@@ -1,17 +1,19 @@
 # Telegram LLM Bot
 
 Бот на Python, который отвечает через локальную LLM с OpenAI-совместимым API
-(vLLM или LM Studio). В группе отвечает, если сообщение начинается с "Нука"
-или если это ответ на сообщение бота.
+(vLLM или LM Studio) и использует LangChain для пайплайна ответов.
+В группе отвечает, если сообщение начинается с "Нука" или если это ответ
+на сообщение бота.
 
 ## Быстрый старт
 
 1) Создай бота в BotFather и возьми токен.
-2) Скопируй `.env.example` в `.env` и заполни `TELEGRAM_BOT_TOKEN`.
-3) Запусти локальную LLM:
+2) Скопируй `.env.example` в `.env` и заполни ключи (`TELEGRAM_BOT_TOKEN`, при необходимости `OPENAI_API_KEY`, `WEB_SEARCH_API_KEY`).
+3) Проверь настройки в `app/config.py` (модель, URL, лимиты, промпты).
+4) Запусти локальную LLM:
    - LM Studio: включи Server и используй `http://localhost:1234/v1`.
    - vLLM: `python -m vllm.entrypoints.openai.api_server --model <model> --port 8000`
-4) Установи зависимости и запусти:
+5) Установи зависимости и запусти:
 
 ```bash
 python -m venv .venv
@@ -19,6 +21,19 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python main.py
 ```
+
+## Структура проекта
+
+- `main.py` — точка входа.
+- `app/bot.py` — сборка и запуск приложения Telegram.
+- `app/handlers.py` — команды и обработчики сообщений.
+- `app/config.py` — конфигурация приложения (ключи берутся из `.env`).
+- `app/llm_client.py` — LLM клиент и пайплайн запроса.
+- `app/pipeline.py` — сбор сообщений, контекст и постобработка ответа.
+- `app/search_client.py` — клиент веб-поиска.
+- `app/state.py` — память диалога и настройки.
+- `app/text_utils.py` — утилиты разбора текста и лимитов.
+- `app/ui.py` — клавиатуры и форматирование настроек.
 
 ## Docker
 
@@ -30,7 +45,8 @@ docker run --env-file .env --name telegram-llm-bot --restart unless-stopped tele
 ```
 
 Если локальная LLM запущена на хосте, внутри контейнера `localhost` не виден.
-Для macOS/Windows укажи `OPENAI_BASE_URL=http://host.docker.internal:1234/v1`.
+Для macOS/Windows укажи `OPENAI_BASE_URL` в `.env` как
+`http://host.docker.internal:1234/v1`.
 Для Linux можно использовать `--network=host` при запуске контейнера.
 
 ## Использование
@@ -68,18 +84,21 @@ docker run --env-file .env --name telegram-llm-bot --restart unless-stopped tele
 
 ## Настройки
 
-Все параметры берутся из `.env`:
+Секреты лежат в `.env`, все остальные параметры — в `app/config.py`.
 
+В `.env` должны быть ключи и параметры подключения:
+
+- `TELEGRAM_BOT_TOKEN` — токен Telegram-бота.
+- `OPENAI_API_KEY` — ключ LLM API (для локальных серверов можно оставить `not-needed`).
 - `OPENAI_BASE_URL` — URL локального API (`http://localhost:1234/v1` для LM Studio).
 - `OPENAI_MODEL` — имя модели.
-- `OPENAI_API_KEY` — токен (для локальных серверов можно оставить `not-needed`).
-- `TRIGGER_WORD` — слово-триггер в группах (по умолчанию `Нука`).
-- `SYSTEM_PROMPT`, `HISTORY_LIMIT`, `MAX_TOKENS`, `TEMPERATURE`, `REQUEST_TIMEOUT`.
-- `CONTEXT_LIMIT_TOKENS` — лимит контекста модели (по умолчанию `32000`).
-- `TOKEN_CHAR_RATIO` — грубая оценка токенов по символам (по умолчанию `4`).
-- `ALLOWED_USER_IDS` — список `user_id` через запятую. Если пусто, доступ открыт.
-- `WEB_SEARCH_ENABLED` — включить поиск в интернете (`1`/`0`).
-- `WEB_SEARCH_PROVIDER` — провайдер поиска (`duckduckgo` или `serper`).
 - `WEB_SEARCH_API_KEY` — ключ API (нужен для `serper`).
-- `WEB_SEARCH_MAX_RESULTS` — число результатов (по умолчанию `5`).
-- `WEB_SEARCH_TIMEOUT` — таймаут поиска в секундах (по умолчанию `15`).
+- `ALLOWED_USER_IDS` — список `user_id` через запятую. Если пусто, доступ открыт.
+
+Остальные параметры (лимиты, промпты, поиск, правила контекста)
+настраиваются прямо в `app/config.py`.
+
+
+docker build -t telegram-llm-bot .
+docker rm -f telegram-llm-bot
+docker run --env-file .env --name telegram-llm-bot --restart unless-stopped telegram-llm-bot

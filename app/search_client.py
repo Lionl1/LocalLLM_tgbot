@@ -1,6 +1,6 @@
 import httpx
 
-from config import (
+from app.config import (
     WEB_SEARCH_API_KEY,
     WEB_SEARCH_MAX_RESULTS,
     WEB_SEARCH_PROVIDER,
