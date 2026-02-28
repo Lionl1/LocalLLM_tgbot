@@ -1,11 +1,17 @@
 import logging
+from io import BytesIO
 
 from telegram import BotCommand
 from telegram.constants import ChatType
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
-from app.config import CONTEXT_LIMIT_TOKENS, WEB_SEARCH_ENABLED, WEB_SEARCH_MAX_RESULTS
+from app.config import (
+    CONTEXT_LIMIT_TOKENS,
+    IMAGE_GENERATION_ENABLED,
+    WEB_SEARCH_ENABLED,
+    WEB_SEARCH_MAX_RESULTS,
+)
 from app.llm_client import LLMRequestError, chat_completion
 from app.pipeline import (
     _build_flat_fallback_messages,
@@ -18,6 +24,7 @@ from app.pipeline import (
     _trim_history_to_fit,
 )
 from app.search_client import WebSearchError, search_web
+from app.image_client import ImageGenerationError, generate_image
 from app.state import (
     apply_pending_action,
     append_history,
@@ -27,6 +34,7 @@ from app.state import (
     get_settings,
     is_allowed_user,
     reset_settings,
+    persist_settings,
     set_history,
     set_pending,
     trim_oldest_history,
@@ -40,10 +48,68 @@ from app.text_utils import (
     _is_triggered,
     _split_message,
     _split_reset_request,
+    detect_image_request,
+    detect_search_request,
 )
 from app.ui import _cancel_keyboard, _format_settings, _settings_keyboard
 
 logger = logging.getLogger(__name__)
+
+_SETTINGS_ADMIN_ONLY_TEXT = "Только администратор может менять настройки."
+
+
+async def _is_group_admin(bot, chat_id, user_id):
+    if user_id is None:
+        return False
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except Exception:
+        return False
+    return member.status in {"administrator", "creator"}
+
+
+async def _require_settings_admin(update, context):
+    chat = update.effective_chat
+    if not chat:
+        return False
+    if chat.type == ChatType.PRIVATE:
+        return True
+    user_id = update.effective_user.id if update.effective_user else None
+    if await _is_group_admin(context.bot, chat.id, user_id):
+        return True
+    if update.message:
+        await _safe_reply_text(update.message, _SETTINGS_ADMIN_ONLY_TEXT)
+    return False
+
+
+async def _require_settings_admin_query(query, context):
+    chat = query.message.chat if query.message else None
+    if not chat:
+        return False
+    if chat.type == ChatType.PRIVATE:
+        return True
+    user_id = query.from_user.id if query.from_user else None
+    if await _is_group_admin(context.bot, chat.id, user_id):
+        return True
+    await query.answer(_SETTINGS_ADMIN_ONLY_TEXT, show_alert=True)
+    return False
+
+
+async def _ensure_update_allowed(update, context):
+    user_id = update.effective_user.id if update.effective_user else None
+    if is_allowed_user(user_id):
+        return True
+    if update.message:
+        await update.message.reply_text("Доступ ограничен.")
+    return False
+
+
+async def _ensure_query_allowed(query, context):
+    user_id = query.from_user.id if query.from_user else None
+    if is_allowed_user(user_id):
+        return True
+    await query.answer("Доступ ограничен.", show_alert=True)
+    return False
 
 
 async def _safe_reply_text(message, text, parse_mode=None, reply_markup=None):
@@ -68,10 +134,28 @@ async def _safe_send_message(bot, chat_id, text, parse_mode=None):
         raise
 
 
+async def _generate_and_send_image(message, prompt):
+    try:
+        image_bytes = await generate_image(prompt)
+    except ImageGenerationError as exc:
+        logger.exception("Image generation failed: %s", exc)
+        await _safe_reply_text(
+            message,
+            "Не удалось сгенерировать изображение. Попробуй изменить запрос.",
+        )
+        return False
+    stream = BytesIO(image_bytes)
+    stream.name = "generated.png"
+    stream.seek(0)
+    caption = f"Запрос: {prompt}"
+    if len(caption) > 180:
+        caption = f"Запрос: {prompt[:177]}..."
+    await message.reply_photo(photo=stream, caption=caption)
+    return True
+
+
 async def start_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
         return
     chat_id = update.effective_chat.id
     trigger_word = get_settings(chat_id)["trigger_word"]
@@ -83,15 +167,14 @@ async def start_command(update, context):
 
 
 async def help_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
         return
     text = (
         "Команды:\n"
         "/settings — открыть настройки\n"
         "/reset — очистить контекст\n"
         "/search <запрос> — поиск в интернете\n"
+        "/image <описание> — генерация картинки\n"
         "/setmood <текст> — задать настроение\n"
         "/setprompt <текст> — доп. системный промпт\n"
         "/setmax <число> — лимит ответа в токенах\n"
@@ -103,9 +186,7 @@ async def help_command(update, context):
 
 
 async def search_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
         return
     query = _get_command_text(update.message.text)
     if not query:
@@ -133,10 +214,23 @@ async def search_command(update, context):
         await _safe_send_message(context.bot, update.effective_chat.id, chunk)
 
 
+async def image_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not IMAGE_GENERATION_ENABLED:
+        await _safe_reply_text(update.message, "Генерация изображений отключена.")
+        return
+    prompt = _get_command_text(update.message.text)
+    if not prompt:
+        await _safe_reply_text(
+            update.message, "Опиши, что нарисовать: /image <описание>."
+        )
+        return
+    await _generate_and_send_image(update.message, prompt)
+
+
 async def reset_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
         return
     chat_id = update.effective_chat.id
     clear_history(chat_id)
@@ -144,9 +238,7 @@ async def reset_command(update, context):
 
 
 async def settings_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
         return
     chat_id = update.effective_chat.id
     settings = get_settings(chat_id)
@@ -158,9 +250,9 @@ async def settings_command(update, context):
 
 
 async def set_mood_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     text = _get_command_text(update.message.text)
@@ -175,24 +267,26 @@ async def set_mood_command(update, context):
         return
     settings = get_settings(chat_id)
     settings["mood"] = text
+    persist_settings()
     await _safe_reply_text(update.message, "Настроение обновлено.")
 
 
 async def clear_mood_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     settings = get_settings(chat_id)
     settings["mood"] = ""
+    persist_settings()
     await _safe_reply_text(update.message, "Настроение очищено.")
 
 
 async def set_prompt_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     text = _get_command_text(update.message.text)
@@ -207,24 +301,26 @@ async def set_prompt_command(update, context):
         return
     settings = get_settings(chat_id)
     settings["extra_prompt"] = text
+    persist_settings()
     await _safe_reply_text(update.message, "Дополнительный промпт сохранен.")
 
 
 async def clear_prompt_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     settings = get_settings(chat_id)
     settings["extra_prompt"] = ""
+    persist_settings()
     await _safe_reply_text(update.message, "Дополнительный промпт очищен.")
 
 
 async def set_trigger_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     text = _get_command_text(update.message.text)
@@ -240,13 +336,14 @@ async def set_trigger_command(update, context):
     trigger = text.split()[0].strip()
     settings = get_settings(chat_id)
     settings["trigger_word"] = trigger
+    persist_settings()
     await _safe_reply_text(update.message, f"Триггер обновлен: {trigger}")
 
 
 async def set_max_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     text = _get_command_text(update.message.text)
@@ -272,13 +369,14 @@ async def set_max_command(update, context):
         return
     settings = get_settings(chat_id)
     settings["max_tokens"] = value
+    persist_settings()
     await _safe_reply_text(update.message, f"Лимит ответа обновлен: {value} токенов.")
 
 
 async def reset_settings_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     reset_settings(chat_id)
@@ -286,9 +384,9 @@ async def reset_settings_command(update, context):
 
 
 async def cancel_command(update, context):
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await update.message.reply_text("Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
     settings = get_settings(chat_id)
@@ -298,13 +396,12 @@ async def cancel_command(update, context):
 
 async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    if not await _ensure_query_allowed(query, context):
+        return
     await query.answer()
     chat_id = query.message.chat_id
     settings = get_settings(chat_id)
     user_id = query.from_user.id if query.from_user else None
-    if not is_allowed_user(user_id):
-        await query.answer("Доступ ограничен.", show_alert=True)
-        return
     data = query.data or ""
 
     if data == "show_settings":
@@ -313,6 +410,8 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
             _format_settings(settings),
             reply_markup=_settings_keyboard(),
         )
+        return
+    if not await _require_settings_admin_query(query, context):
         return
     if data == "reset_settings":
         reset_settings(chat_id)
@@ -324,10 +423,12 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
         return
     if data == "clear_mood":
         settings["mood"] = ""
+        persist_settings()
         await _safe_reply_text(query.message, "Настроение очищено.")
         return
     if data == "clear_prompt":
         settings["extra_prompt"] = ""
+        persist_settings()
         await _safe_reply_text(query.message, "Дополнительный промпт очищен.")
         return
     if data == "cancel":
@@ -354,6 +455,7 @@ async def post_init(application):
     commands = [
         BotCommand("settings", "Настройки бота"),
         BotCommand("reset", "Сбросить контекст диалога"),
+        BotCommand("image", "Сгенерировать картинку"),
         BotCommand("help", "Краткая справка"),
         BotCommand("search", "Поиск в интернете"),
     ]
@@ -372,9 +474,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     bot_username = context.bot.username or ""
     chat_id = update.effective_chat.id
-    if not is_allowed_user(update.effective_user.id if update.effective_user else None):
-        if update.effective_chat.type == ChatType.PRIVATE:
-            await _safe_reply_text(update.message, "Доступ ограничен.")
+    if not await _ensure_update_allowed(update, context):
         return
     settings = get_settings(chat_id)
     pending_action = settings.get("pending_action")
@@ -392,6 +492,29 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             await _safe_reply_text(
                 update.message, message, reply_markup=_settings_keyboard()
             )
+            return
+    if IMAGE_GENERATION_ENABLED:
+        image_description = detect_image_request(text)
+        if image_description:
+            await _generate_and_send_image(update.message, image_description)
+            return
+    if WEB_SEARCH_ENABLED:
+        search_query = detect_search_request(text)
+        if search_query:
+            try:
+                results = await search_web(search_query, limit=WEB_SEARCH_MAX_RESULTS)
+            except WebSearchError as exc:
+                logger.exception("Web search failed: %s", exc)
+                await _safe_reply_text(update.message, "Не удалось выполнить поиск.")
+                return
+            if not results:
+                await _safe_reply_text(update.message, "Ничего не нашел по этому запросу.")
+                return
+            text_results = _format_search_results(results, search_query)
+            chunks = _split_message(text_results)
+            await _safe_reply_text(update.message, chunks[0])
+            for chunk in chunks[1:]:
+                await _safe_send_message(context.bot, chat_id, chunk)
             return
     trigger_word = settings["trigger_word"]
     if not _is_triggered(update, text, context.bot.id, bot_username, trigger_word):

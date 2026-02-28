@@ -13,6 +13,13 @@ def _get_env(name, default=None, required=False):
     return value
 
 
+def _get_bool_env(name, default="0"):
+    value = os.getenv(name)
+    if value is None:
+        value = default
+    return value.strip().lower() in {"1", "true", "yes"}
+
+
 TELEGRAM_BOT_TOKEN = _get_env("TELEGRAM_BOT_TOKEN", required=True)
 
 OPENAI_API_KEY = _get_env("OPENAI_API_KEY", "not-needed")
@@ -54,3 +61,11 @@ WEB_SEARCH_ENABLED = True
 WEB_SEARCH_PROVIDER = "serper"
 WEB_SEARCH_MAX_RESULTS = 10
 WEB_SEARCH_TIMEOUT = 15
+
+IMAGE_GENERATION_ENABLED = _get_bool_env("IMAGE_GENERATION_ENABLED", "1")
+IMAGE_GENERATION_ENDPOINT = _get_env(
+    "IMAGE_GENERATION_ENDPOINT", "https://image.pollinations.ai/prompt/"
+)
+IMAGE_GENERATION_TIMEOUT = int(_get_env("IMAGE_GENERATION_TIMEOUT", "60"))
+IMAGE_GENERATION_WIDTH = int(_get_env("IMAGE_GENERATION_WIDTH", "1024"))
+IMAGE_GENERATION_HEIGHT = int(_get_env("IMAGE_GENERATION_HEIGHT", "1024"))

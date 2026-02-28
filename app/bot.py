@@ -9,6 +9,7 @@ from app.handlers import (
     clear_prompt_command,
     handle_message,
     help_command,
+    image_command,
     post_init,
     reset_command,
     reset_settings_command,
@@ -39,6 +40,7 @@ def main():
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("reset", reset_command))
     application.add_handler(CommandHandler("settings", settings_command))
+    application.add_handler(CommandHandler("image", image_command))
     application.add_handler(CommandHandler("setmood", set_mood_command))
     application.add_handler(CommandHandler("clearmood", clear_mood_command))
     application.add_handler(CommandHandler("setprompt", set_prompt_command))

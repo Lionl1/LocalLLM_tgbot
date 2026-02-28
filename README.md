@@ -61,6 +61,9 @@ docker run --env-file .env --name telegram-llm-bot --restart unless-stopped tele
 - Если отвечаешь на сообщение человека, бот добавит этот текст в контекст запроса.
 - `/help` — список команд и кнопки настроек.
 - `/search <текст>` — поиск в интернете (если включен).
+- `/image <описание>` — генерация картинки через бесплатный сервис (по умолчанию Pollinations), бот отправит изображение.
+- Бот автоматически запускает генерацию, если видит текст вроде «нарисуй картинку с...», даже без команды.
+- Бот автоматически выполняет поиск по тексту вроде «найди в интернете», чтобы показать результаты без команды.
 - Префикс `web:`/`search:`/`поиск:`/`найди в интернете` — выполнить поиск и передать результаты модели.
 
 ### Настройки в чате
@@ -94,6 +97,11 @@ docker run --env-file .env --name telegram-llm-bot --restart unless-stopped tele
 - `OPENAI_MODEL` — имя модели.
 - `WEB_SEARCH_API_KEY` — ключ API (нужен для `serper`).
 - `ALLOWED_USER_IDS` — список `user_id` через запятую. Если пусто, доступ открыт.
+- `IMAGE_GENERATION_ENABLED` — `1`/`0`, включает генерацию картинок внутри бота (по умолчанию `1`).
+- `IMAGE_GENERATION_ENDPOINT` — URL генератора. Для Pollinations: `https://image.pollinations.ai/prompt/`. Для Hugging Face: `https://api-inference.huggingface.co/models/<model_id>`.
+- `HUGGING_FACE_TOKEN` — (опционально) токен Hugging Face (Write), если используется их API.
+- `IMAGE_GENERATION_TIMEOUT` — таймаут запроса в секундах (по умолчанию `60`).
+- `IMAGE_GENERATION_WIDTH`, `IMAGE_GENERATION_HEIGHT` — желаемый размер картинки (по умолчанию `1024`).
 
 Остальные параметры (лимиты, промпты, поиск, правила контекста)
 настраиваются прямо в `app/config.py`.

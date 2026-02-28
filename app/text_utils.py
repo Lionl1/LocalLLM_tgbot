@@ -1,4 +1,5 @@
 import math
+import re
 
 from telegram.constants import ChatType
 
@@ -175,3 +176,72 @@ def _estimate_messages_tokens(messages):
         content = message.get("content", "")
         total += 4 + _estimate_tokens(content)
     return total
+
+
+_IMAGE_ACTION_WORDS = [
+    "сгенерируй",
+    "нарисуй",
+    "создай",
+    "сделай",
+    "придумай",
+    "отрисуй",
+    "построй",
+    "покажи",
+]
+_IMAGE_NOUN_WORDS = [
+    "картин",
+    "рисунк",
+    "фото",
+    "изображен",
+    "иллюстрац",
+    "арт",
+    "скетч",
+    "постер",
+]
+_IMAGE_POLITE_WORDS = ["пожалуйста", "пж", "плиз", "пжл"]
+_IMAGE_REMOVAL_WORDS = _IMAGE_ACTION_WORDS + _IMAGE_NOUN_WORDS + _IMAGE_POLITE_WORDS
+_IMAGE_REMOVAL_REGEX = re.compile("|".join(re.escape(word) for word in _IMAGE_REMOVAL_WORDS), re.IGNORECASE)
+
+
+def detect_image_request(text):
+    if not text:
+        return ""
+    normalized = _normalize(text)
+    if not any(action in normalized for action in _IMAGE_ACTION_WORDS):
+        return ""
+    if not any(noun in normalized for noun in _IMAGE_NOUN_WORDS):
+        return ""
+    cleaned = _IMAGE_REMOVAL_REGEX.sub(" ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n,.:;—-")
+    return cleaned or text.strip()
+
+
+_SEARCH_ACTION_WORDS = [
+    "найди",
+    "поищи",
+    "проведи поиск",
+    "выполни поиск",
+    "покажи",
+    "узнай",
+    "поиск",
+]
+_SEARCH_CONTEXT_WORDS = [
+    "в интернете",
+    "в сети",
+    "в вебе",
+    "онлайн",
+    "в веб",
+]
+_SEARCH_REMOVAL_WORDS = _SEARCH_ACTION_WORDS + _SEARCH_CONTEXT_WORDS + _IMAGE_POLITE_WORDS
+_SEARCH_REMOVAL_REGEX = re.compile("|".join(re.escape(word) for word in _SEARCH_REMOVAL_WORDS), re.IGNORECASE)
+
+
+def detect_search_request(text):
+    if not text:
+        return ""
+    normalized = _normalize(text)
+    if not any(action in normalized for action in _SEARCH_ACTION_WORDS):
+        return ""
+    cleaned = _SEARCH_REMOVAL_REGEX.sub(" ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n,.:;—-")
+    return cleaned
