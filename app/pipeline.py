@@ -8,6 +8,8 @@ from app.text_utils import _estimate_messages_tokens
 
 logger = logging.getLogger(__name__)
 
+_SUMMARY_PREFIX = "Краткое содержание предыдущего разговора:"
+
 
 def _priority_instruction(settings):
     if settings.get("enforce_last_message_priority", True):
@@ -113,7 +115,7 @@ def _looks_like_markdown(text):
 def _strip_markdown_syntax(text):
     if not text:
         return text
-    text = re.sub(r"```[^\n]*\n(.*?)```", lambda m: m.group(1).strip(), text, flags=re.S)
+    text = re.sub(r"```(?:[^\n]*\n)?(.*?)```", lambda m: m.group(1).strip(), text, flags=re.S)
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"__(.+?)__", r"\1", text)
@@ -168,11 +170,42 @@ async def _format_response_with_llm(prompt, response_text, settings):
     return formatted or response_text
 
 
+async def _fix_syntax_with_llm(text, settings):
+    if not settings.get("check_syntax"):
+        return text
+    
+    prompt = (
+        "Проверь следующий текст на наличие грамматических, орфографических и пунктуационных ошибок. "
+        "Исправь их, сохранив исходный стиль и структуру (включая Markdown). "
+        "Не меняй сленг, неологизмы и творческие обороты.\n"
+        "Верни ТОЛЬКО исправленный текст, без вступлений и пояснений.\n\n"
+        f"Текст:\n{text}"
+    )
+    
+    messages = [
+        {"role": "system", "content": "Ты корректор. Твоя задача — исправить грубые ошибки, сохраняя авторский стиль."},
+        {"role": "user", "content": prompt}
+    ]
+    
+    try:
+        logger.info("Performing syntax check request...")
+        corrected = await chat_completion(
+            messages,
+            max_tokens=settings["max_tokens"],
+            temperature=0.1,
+        )
+        return (corrected or "").strip() or text
+    except Exception as exc:
+        logger.warning("Syntax check failed: %s", exc)
+        return text
+
+
 async def _postprocess_response(prompt, response_text, settings):
     text = (response_text or "").strip()
     if not text:
         return text, None
     text = await _format_response_with_llm(prompt, text, settings)
+    text = await _fix_syntax_with_llm(text, settings)
     if settings.get("strip_markdown"):
         text = _strip_markdown_syntax(text)
         return text, None
@@ -192,13 +225,82 @@ def _context_limit_exceeded(messages, max_tokens):
     return _estimate_messages_tokens(messages) > _max_prompt_tokens(max_tokens)
 
 
-def _trim_history_to_fit(history, prompt, reply_text, settings, web_context=""):
+async def _generate_summary(text_to_summarize):
+    prompt = (
+        "Твоя задача — обновить краткое содержание (summary) диалога.\n"
+        "1. Сохрани важные факты, имена и контекст из текущего саммари (если есть).\n"
+        "2. Добавь ключевую информацию из новых сообщений.\n"
+        "3. Будь предельно лаконичен, убирай воду и приветствия.\n\n"
+        "4. Учити шутки сарказм и юмор если он был"
+        f"ТЕКСТ ДЛЯ АНАЛИЗА:\n{text_to_summarize}"
+    )
+    
+    try:
+        summary = await chat_completion(
+            [{"role": "user", "content": prompt}],
+            max_tokens=400,
+            temperature=0.3
+        )
+        return summary
+    except Exception as exc:
+        logger.warning("Failed to generate summary: %s", exc)
+        return None
+
+
+async def _trim_history_to_fit(history, prompt, reply_text, settings, web_context=""):
     trimmed = False
     messages = _build_messages(history, prompt, reply_text, settings, web_context)
+    
+    # Если контекст уже влезает — возвращаем как есть
+    if not _context_limit_exceeded(messages, settings["max_tokens"]):
+        return history, trimmed, messages
+
+    # Проверяем, есть ли уже саммари в начале истории (System message с префиксом)
+    existing_summary_text = ""
+    start_idx = 0
+    if history and history[0].get("role") == "system" and history[0]["content"].startswith(_SUMMARY_PREFIX):
+        existing_summary_text = history[0]["content"].replace(_SUMMARY_PREFIX, "").strip()
+        start_idx = 1  # Пропускаем сообщение с саммари при нарезке, учтем его отдельно
+
+    # Работаем только с "живыми" сообщениями (без старого саммари)
+    active_history = history[start_idx:]
+
+    # Попытка саммаризации, если есть что сжимать
+    if len(active_history) > 1:
+        # Сжимаем старые 60% сообщений, оставляя свежие 40%
+        split_idx = max(1, int(len(active_history) * 0.6))
+        msgs_to_compress = active_history[:split_idx]
+        recent_history = active_history[split_idx:]
+
+        # Формируем текст для LLM: Старое саммари + Старые сообщения
+        text_block = ""
+        if existing_summary_text:
+            text_block += f"=== ТЕКУЩЕЕ САММАРИ ===\n{existing_summary_text}\n\n"
+        
+        text_block += "=== НОВЫЕ СООБЩЕНИЯ ===\n"
+        for msg in msgs_to_compress:
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            text_block += f"{role}: {msg.get('content', '')}\n"
+
+        logger.info("Context exceeded. Updating summary with %d messages...", len(msgs_to_compress))
+        new_summary = await _generate_summary(text_block)
+
+        if new_summary:
+            summary_message = {
+                "role": "system",
+                "content": f"{_SUMMARY_PREFIX} {new_summary}"
+            }
+            history = [summary_message] + recent_history
+            trimmed = True
+            # Пересобираем сообщения с учетом саммари
+            messages = _build_messages(history, prompt, reply_text, settings, web_context)
+
+    # Если даже с саммари всё равно не влезает (или саммари не удалось) — режем по старинке
     while history and _context_limit_exceeded(messages, settings["max_tokens"]):
         history = trim_oldest_history(history)
         trimmed = True
         messages = _build_messages(history, prompt, reply_text, settings, web_context)
+        
     return history, trimmed, messages
 
 

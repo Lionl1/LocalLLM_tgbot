@@ -15,6 +15,7 @@ def _format_settings(settings):
             else "Лимит символов: не задан"
         ),
         f"Макс. ответ (tokens): {settings['max_tokens']}",
+        f"Синтаксис: {'ВКЛ' if settings.get('check_syntax') else 'ВЫКЛ'}",
     ]
     return "\n".join(lines)
 

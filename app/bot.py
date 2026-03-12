@@ -21,6 +21,7 @@ from app.handlers import (
     settings_button,
     settings_command,
     start_command,
+    toggle_syntax_command,
 )
 
 
@@ -46,6 +47,7 @@ def main():
     application.add_handler(CommandHandler("setprompt", set_prompt_command))
     application.add_handler(CommandHandler("clearprompt", clear_prompt_command))
     application.add_handler(CommandHandler("setmax", set_max_command))
+    application.add_handler(CommandHandler("checksyntax", toggle_syntax_command))
     application.add_handler(CommandHandler("settrigger", set_trigger_command))
     application.add_handler(CommandHandler("setname", set_trigger_command))
     application.add_handler(CommandHandler("resetsettings", reset_settings_command))

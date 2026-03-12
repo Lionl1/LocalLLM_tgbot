@@ -2,7 +2,7 @@ import logging
 from io import BytesIO
 
 from telegram import BotCommand
-from telegram.constants import ChatType
+from telegram.constants import ChatAction, ChatType
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
@@ -33,6 +33,7 @@ from app.state import (
     get_history,
     get_settings,
     is_allowed_user,
+    load_persisted_chat_settings,
     reset_settings,
     persist_settings,
     set_history,
@@ -136,12 +137,16 @@ async def _safe_send_message(bot, chat_id, text, parse_mode=None):
 
 async def _generate_and_send_image(message, prompt):
     try:
+        await message.chat.send_action(action=ChatAction.UPLOAD_PHOTO)
         image_bytes = await generate_image(prompt)
     except ImageGenerationError as exc:
         logger.exception("Image generation failed: %s", exc)
+        error_msg = "Не удалось сгенерировать изображение."
+        if "500" in str(exc) or "503" in str(exc):
+            error_msg += " Сервис генерации временно перегружен."
         await _safe_reply_text(
             message,
-            "Не удалось сгенерировать изображение. Попробуй изменить запрос.",
+            error_msg,
         )
         return False
     stream = BytesIO(image_bytes)
@@ -150,7 +155,28 @@ async def _generate_and_send_image(message, prompt):
     caption = f"Запрос: {prompt}"
     if len(caption) > 180:
         caption = f"Запрос: {prompt[:177]}..."
-    await message.reply_photo(photo=stream, caption=caption)
+    
+    try:
+        await message.reply_photo(
+            photo=stream,
+            caption=caption,
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=60,
+        )
+    except BadRequest as exc:
+        # Если Telegram не смог обработать картинку, пробуем отправить как файл (документ)
+        # Это поможет диагностировать проблему (например, если пришел текстовый файл с ошибкой)
+        logger.warning("reply_photo failed (%s), trying reply_document...", exc)
+        stream.seek(0)
+        await message.reply_document(
+            document=stream,
+            caption=caption + " (отправлено файлом из-за ошибки обработки)",
+            read_timeout=60,
+            write_timeout=60,
+            connect_timeout=60,
+        )
+
     return True
 
 
@@ -199,6 +225,7 @@ async def search_command(update, context):
         )
         return
     try:
+        await update.message.chat.send_action(action=ChatAction.TYPING)
         results = await search_web(query, limit=WEB_SEARCH_MAX_RESULTS)
     except WebSearchError as exc:
         logger.exception("Web search failed: %s", exc)
@@ -267,7 +294,7 @@ async def set_mood_command(update, context):
         return
     settings = get_settings(chat_id)
     settings["mood"] = text
-    persist_settings()
+    await persist_settings()
     await _safe_reply_text(update.message, "Настроение обновлено.")
 
 
@@ -279,7 +306,7 @@ async def clear_mood_command(update, context):
     chat_id = update.effective_chat.id
     settings = get_settings(chat_id)
     settings["mood"] = ""
-    persist_settings()
+    await persist_settings()
     await _safe_reply_text(update.message, "Настроение очищено.")
 
 
@@ -301,7 +328,7 @@ async def set_prompt_command(update, context):
         return
     settings = get_settings(chat_id)
     settings["extra_prompt"] = text
-    persist_settings()
+    await persist_settings()
     await _safe_reply_text(update.message, "Дополнительный промпт сохранен.")
 
 
@@ -313,7 +340,7 @@ async def clear_prompt_command(update, context):
     chat_id = update.effective_chat.id
     settings = get_settings(chat_id)
     settings["extra_prompt"] = ""
-    persist_settings()
+    await persist_settings()
     await _safe_reply_text(update.message, "Дополнительный промпт очищен.")
 
 
@@ -336,7 +363,7 @@ async def set_trigger_command(update, context):
     trigger = text.split()[0].strip()
     settings = get_settings(chat_id)
     settings["trigger_word"] = trigger
-    persist_settings()
+    await persist_settings()
     await _safe_reply_text(update.message, f"Триггер обновлен: {trigger}")
 
 
@@ -369,8 +396,21 @@ async def set_max_command(update, context):
         return
     settings = get_settings(chat_id)
     settings["max_tokens"] = value
-    persist_settings()
+    await persist_settings()
     await _safe_reply_text(update.message, f"Лимит ответа обновлен: {value} токенов.")
+
+
+async def toggle_syntax_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    if not await _require_settings_admin(update, context):
+        return
+    chat_id = update.effective_chat.id
+    settings = get_settings(chat_id)
+    settings["check_syntax"] = not settings.get("check_syntax", False)
+    await persist_settings()
+    state = "включена" if settings["check_syntax"] else "выключена"
+    await _safe_reply_text(update.message, f"Проверка синтаксиса {state}.")
 
 
 async def reset_settings_command(update, context):
@@ -379,7 +419,7 @@ async def reset_settings_command(update, context):
     if not await _require_settings_admin(update, context):
         return
     chat_id = update.effective_chat.id
-    reset_settings(chat_id)
+    await reset_settings(chat_id)
     await _safe_reply_text(update.message, "Настройки сброшены к значениям по умолчанию.")
 
 
@@ -414,7 +454,7 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
     if not await _require_settings_admin_query(query, context):
         return
     if data == "reset_settings":
-        reset_settings(chat_id)
+        await reset_settings(chat_id)
         await _safe_reply_text(
             query.message,
             "Настройки сброшены к значениям по умолчанию.",
@@ -423,12 +463,12 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
         return
     if data == "clear_mood":
         settings["mood"] = ""
-        persist_settings()
+        await persist_settings()
         await _safe_reply_text(query.message, "Настроение очищено.")
         return
     if data == "clear_prompt":
         settings["extra_prompt"] = ""
-        persist_settings()
+        await persist_settings()
         await _safe_reply_text(query.message, "Дополнительный промпт очищен.")
         return
     if data == "cancel":
@@ -452,6 +492,7 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def post_init(application):
+    await load_persisted_chat_settings()
     commands = [
         BotCommand("settings", "Настройки бота"),
         BotCommand("reset", "Сбросить контекст диалога"),
@@ -468,8 +509,6 @@ async def post_init(application):
 async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
-    # if update.message.from_user and update.message.from_user.is_bot:
-    #     return
 
     text = update.message.text
     bot_username = context.bot.username or ""
@@ -486,7 +525,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                 clear_pending(settings)
                 await _safe_reply_text(update.message, "Отменено.")
                 return
-            success, message = apply_pending_action(pending_action, text, settings)
+            success, message = await apply_pending_action(pending_action, text, settings)
             if success:
                 clear_pending(settings)
             await _safe_reply_text(
@@ -498,26 +537,32 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         if image_description:
             await _generate_and_send_image(update.message, image_description)
             return
+    web_context = ""
+    web_results_text = ""
+    performed_web_search = False
+
     if WEB_SEARCH_ENABLED:
         search_query = detect_search_request(text)
         if search_query:
             try:
+                await update.message.chat.send_action(action=ChatAction.TYPING)
                 results = await search_web(search_query, limit=WEB_SEARCH_MAX_RESULTS)
+                if not results:
+                    await _safe_reply_text(update.message, "Ничего не нашел по этому запросу.")
+                    return
+                web_results_text = _format_search_results(results, search_query)
+                web_context = (
+                    "Данные из интернета (результаты поиска; проверь факты):\n"
+                    f"{web_results_text}"
+                )
+                performed_web_search = True
             except WebSearchError as exc:
                 logger.exception("Web search failed: %s", exc)
                 await _safe_reply_text(update.message, "Не удалось выполнить поиск.")
                 return
-            if not results:
-                await _safe_reply_text(update.message, "Ничего не нашел по этому запросу.")
-                return
-            text_results = _format_search_results(results, search_query)
-            chunks = _split_message(text_results)
-            await _safe_reply_text(update.message, chunks[0])
-            for chunk in chunks[1:]:
-                await _safe_send_message(context.bot, chat_id, chunk)
-            return
+
     trigger_word = settings["trigger_word"]
-    if not _is_triggered(update, text, context.bot.id, bot_username, trigger_word):
+    if not _is_triggered(update, text, context.bot.id, bot_username, trigger_word) and not performed_web_search:
         return
 
     prompt = _extract_prompt(text, bot_username, trigger_word)
@@ -531,9 +576,11 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             f"Сформулируй запрос после '{trigger_word}'."
         )
         return
-    web_context = ""
-    web_results_text = ""
-    web_query, prompt = _extract_web_query(prompt)
+
+    web_query = None
+    if not performed_web_search:
+        web_query, prompt = _extract_web_query(prompt)
+
     if web_query:
         if not WEB_SEARCH_ENABLED:
             await _safe_reply_text(
@@ -542,6 +589,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         try:
+            await update.message.chat.send_action(action=ChatAction.TYPING)
             results = await search_web(web_query, limit=WEB_SEARCH_MAX_RESULTS)
         except WebSearchError as exc:
             logger.exception("Web search failed: %s", exc)
@@ -566,7 +614,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         reply_text = ""
 
     history = list(get_history(chat_id))
-    history, trimmed, messages = _trim_history_to_fit(
+    history, trimmed, messages = await _trim_history_to_fit(
         history, prompt, reply_text, settings, web_context
     )
     if trimmed:
@@ -579,6 +627,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     attempts = 0
+    await update.message.chat.send_action(action=ChatAction.TYPING)
     max_attempts = max(1, len(history) // 2 + 1)
     while True:
         try:

@@ -178,18 +178,23 @@ def _estimate_messages_tokens(messages):
     return total
 
 
-_IMAGE_ACTION_WORDS = [
-    "сгенерируй",
+_IMAGE_STRONG_ACTION_WORDS = [
     "нарисуй",
+    "отрисуй",
+]
+_IMAGE_WEAK_ACTION_WORDS = [
+    "сгенерируй",
     "создай",
     "сделай",
     "придумай",
-    "отрисуй",
     "построй",
     "покажи",
 ]
+_IMAGE_ACTION_WORDS = _IMAGE_STRONG_ACTION_WORDS + _IMAGE_WEAK_ACTION_WORDS
+
 _IMAGE_NOUN_WORDS = [
     "картин",
+    "рисун",
     "рисунк",
     "фото",
     "изображен",
@@ -200,17 +205,30 @@ _IMAGE_NOUN_WORDS = [
 ]
 _IMAGE_POLITE_WORDS = ["пожалуйста", "пж", "плиз", "пжл"]
 _IMAGE_REMOVAL_WORDS = _IMAGE_ACTION_WORDS + _IMAGE_NOUN_WORDS + _IMAGE_POLITE_WORDS
-_IMAGE_REMOVAL_REGEX = re.compile("|".join(re.escape(word) for word in _IMAGE_REMOVAL_WORDS), re.IGNORECASE)
+# Создаем регулярку, которая удаляет слова целиком, если они начинаются с корней из списка
+# Сортируем по длине, чтобы сначала пробовать длинные совпадения
+_sorted_removal = sorted(_IMAGE_REMOVAL_WORDS, key=len, reverse=True)
+_pattern = r"\b(?:" + "|".join(re.escape(word) for word in _sorted_removal) + r")\w*"
+_IMAGE_REMOVAL_REGEX = re.compile(_pattern, re.IGNORECASE)
 
 
 def detect_image_request(text):
     if not text:
         return ""
     normalized = _normalize(text)
-    if not any(action in normalized for action in _IMAGE_ACTION_WORDS):
+    
+    has_strong = any(action in normalized for action in _IMAGE_STRONG_ACTION_WORDS)
+    has_weak = any(action in normalized for action in _IMAGE_WEAK_ACTION_WORDS)
+    
+    if not has_strong and not has_weak:
         return ""
-    if not any(noun in normalized for noun in _IMAGE_NOUN_WORDS):
+
+    has_noun = any(noun in normalized for noun in _IMAGE_NOUN_WORDS)
+    
+    # Если глагол слабый (напр. "создай", "сделай"), то обязательно нужно существительное ("картинку")
+    if not has_strong and not has_noun:
         return ""
+        
     cleaned = _IMAGE_REMOVAL_REGEX.sub(" ", text)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n,.:;—-")
     return cleaned or text.strip()

@@ -1,9 +1,11 @@
 import json
 from pathlib import Path
 
+import aiofiles
 from app.config import (
     ALLOWED_USER_IDS as _RAW_ALLOWED_USER_IDS,
     CONTEXT_LIMIT_TOKENS,
+    CHECK_SYNTAX,
     CONTEXT_POLICY,
     ENFORCE_LAST_MESSAGE_PRIORITY,
     FORMAT_WITH_LLM,
@@ -48,18 +50,20 @@ DEFAULT_SETTINGS = {
     "enforce_last_message_priority": ENFORCE_LAST_MESSAGE_PRIORITY,
     "plain_text_output": PLAIN_TEXT_OUTPUT,
     "render_markdown": RENDER_MARKDOWN,
+    "check_syntax": CHECK_SYNTAX,
     "strip_markdown": STRIP_MARKDOWN,
     "pending_action": "",
     "pending_user_id": None,
 }
 
 
-def _load_persisted_chat_settings():
+async def load_persisted_chat_settings():
     if not CHAT_SETTINGS_FILE.exists():
         return
     try:
-        with CHAT_SETTINGS_FILE.open("r", encoding="utf-8") as stream:
-            raw = json.load(stream)
+        async with aiofiles.open(CHAT_SETTINGS_FILE, "r", encoding="utf-8") as stream:
+            content = await stream.read()
+            raw = json.loads(content)
     except (OSError, json.JSONDecodeError):
         return
     for raw_chat_id, settings in raw.items():
@@ -70,22 +74,18 @@ def _load_persisted_chat_settings():
         CHAT_SETTINGS[chat_id] = settings
 
 
-def _write_chat_settings():
+async def _write_chat_settings():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     payload = {str(chat_id): settings for chat_id, settings in CHAT_SETTINGS.items()}
     try:
-        with CHAT_SETTINGS_FILE.open("w", encoding="utf-8") as stream:
-            json.dump(payload, stream, ensure_ascii=False, indent=2)
+        async with aiofiles.open(CHAT_SETTINGS_FILE, "w", encoding="utf-8") as stream:
+            await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
     except OSError:
         return
 
 
-def persist_settings():
-    _write_chat_settings()
-
-
-_load_persisted_chat_settings()
-
+async def persist_settings():
+    await _write_chat_settings()
 
 def get_settings(chat_id):
     settings = CHAT_SETTINGS.get(chat_id)
@@ -98,9 +98,9 @@ def get_settings(chat_id):
     return settings
 
 
-def reset_settings(chat_id):
+async def reset_settings(chat_id):
     CHAT_SETTINGS.pop(chat_id, None)
-    persist_settings()
+    await persist_settings()
 
 
 def clear_history(chat_id):
@@ -139,26 +139,26 @@ def clear_pending(settings):
     settings["pending_user_id"] = None
 
 
-def apply_pending_action(action, text, settings):
+async def apply_pending_action(action, text, settings):
     value = text.strip()
     if action == "set_mood":
         if not value:
             return False, "Нужно указать настроение."
         settings["mood"] = value
-        persist_settings()
+        await persist_settings()
         return True, "Настроение обновлено."
     if action == "set_prompt":
         if not value:
             return False, "Нужно указать текст промпта."
         settings["extra_prompt"] = value
-        persist_settings()
+        await persist_settings()
         return True, "Дополнительный промпт сохранен."
     if action == "set_trigger":
         if not value:
             return False, "Нужно указать слово-триггер."
         trigger = value.split()[0]
         settings["trigger_word"] = trigger
-        persist_settings()
+        await persist_settings()
         return True, f"Триггер обновлен: {trigger}"
     if action == "set_max":
         try:
@@ -170,14 +170,14 @@ def apply_pending_action(action, text, settings):
         if max_tokens >= CONTEXT_LIMIT_TOKENS:
             return False, "Слишком большое значение для контекста."
         settings["max_tokens"] = max_tokens
-        persist_settings()
+        await persist_settings()
         return True, f"Лимит ответа обновлен: {max_tokens} токенов."
     return False, "Неизвестная команда."
 
 
 def is_allowed_user(user_id):
     if not ALLOWED_USER_IDS:
-        return False
+        return True
     if user_id is None:
         return False
     return user_id in ALLOWED_USER_IDS
