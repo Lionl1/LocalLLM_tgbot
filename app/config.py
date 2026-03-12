@@ -1,10 +1,7 @@
 import os
-
 from dotenv import load_dotenv
 
-
 load_dotenv()
-
 
 def _get_env(name, default=None, required=False):
     value = os.getenv(name, default)
@@ -18,7 +15,6 @@ def _get_bool_env(name, default="0"):
     if value is None:
         value = default
     return value.strip().lower() in {"1", "true", "yes"}
-
 
 TELEGRAM_BOT_TOKEN = _get_env("TELEGRAM_BOT_TOKEN", required=True)
 

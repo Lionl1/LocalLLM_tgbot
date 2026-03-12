@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 _SUMMARY_PREFIX = "Краткое содержание предыдущего разговора:"
 
-
 def _priority_instruction(settings):
     if settings.get("enforce_last_message_priority", True):
         return (
@@ -18,7 +17,6 @@ def _priority_instruction(settings):
             "Историю используй только если она напрямую связана с текущим запросом."
         )
     return ""
-
 
 def _compose_system_prompt(settings):
     parts = [settings["system_prompt"]]
@@ -44,7 +42,6 @@ def _compose_system_prompt(settings):
         )
     return "\n\n".join(parts)
 
-
 def _build_messages(history, prompt, reply_text, settings, web_context=""):
     system_prompt = _compose_system_prompt(settings)
     if web_context:
@@ -60,7 +57,6 @@ def _build_messages(history, prompt, reply_text, settings, web_context=""):
         )
     messages.append({"role": "user", "content": prompt})
     return messages
-
 
 def _build_flat_fallback_messages(
     history, prompt, reply_text, settings, web_context=""
@@ -94,7 +90,6 @@ def _build_flat_fallback_messages(
         {"role": "user", "content": user_content},
     ]
 
-
 def _trim_to_char_limit(text, max_chars):
     if max_chars <= 0 or not text or len(text) <= max_chars:
         return text
@@ -124,7 +119,6 @@ def _strip_markdown_syntax(text):
     text = re.sub(r"(?m)^#{1,6}\s+", "", text)
     text = re.sub(r"(?m)^>\s?", "", text)
     return text
-
 
 async def _format_response_with_llm(prompt, response_text, settings):
     if not settings.get("response_format") or not settings.get("format_with_llm"):
@@ -169,7 +163,6 @@ async def _format_response_with_llm(prompt, response_text, settings):
     formatted = (formatted or "").strip()
     return formatted or response_text
 
-
 async def _fix_syntax_with_llm(text, settings):
     if not settings.get("check_syntax"):
         return text
@@ -199,7 +192,6 @@ async def _fix_syntax_with_llm(text, settings):
         logger.warning("Syntax check failed: %s", exc)
         return text
 
-
 async def _postprocess_response(prompt, response_text, settings):
     text = (response_text or "").strip()
     if not text:
@@ -216,14 +208,11 @@ async def _postprocess_response(prompt, response_text, settings):
         text = _trim_to_char_limit(text, settings["max_response_chars"])
     return text, parse_mode
 
-
 def _max_prompt_tokens(max_tokens):
     return max(CONTEXT_LIMIT_TOKENS - max_tokens, 1)
 
-
 def _context_limit_exceeded(messages, max_tokens):
     return _estimate_messages_tokens(messages) > _max_prompt_tokens(max_tokens)
-
 
 async def _generate_summary(text_to_summarize):
     prompt = (
@@ -231,7 +220,7 @@ async def _generate_summary(text_to_summarize):
         "1. Сохрани важные факты, имена и контекст из текущего саммари (если есть).\n"
         "2. Добавь ключевую информацию из новых сообщений.\n"
         "3. Будь предельно лаконичен, убирай воду и приветствия.\n\n"
-        "4. Учити шутки сарказм и юмор если он был"
+        "4. Учитывай шутки, сарказм и юмор, если они были.\n\n"
         f"ТЕКСТ ДЛЯ АНАЛИЗА:\n{text_to_summarize}"
     )
     
@@ -245,7 +234,6 @@ async def _generate_summary(text_to_summarize):
     except Exception as exc:
         logger.warning("Failed to generate summary: %s", exc)
         return None
-
 
 async def _trim_history_to_fit(history, prompt, reply_text, settings, web_context=""):
     trimmed = False
@@ -303,7 +291,6 @@ async def _trim_history_to_fit(history, prompt, reply_text, settings, web_contex
         
     return history, trimmed, messages
 
-
 def _is_context_overflow_error(exc):
     text = str(exc).casefold()
     tokens = [
@@ -316,7 +303,6 @@ def _is_context_overflow_error(exc):
         "max_tokens",
     ]
     return any(token in text for token in tokens)
-
 
 def _is_message_header_error(exc):
     text = str(exc).casefold()

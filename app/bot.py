@@ -1,7 +1,5 @@
 import logging
-
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
-
 from app.config import TELEGRAM_BOT_TOKEN
 from app.handlers import (
     cancel_command,
@@ -24,12 +22,10 @@ from app.handlers import (
     toggle_syntax_command,
 )
 
-
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-
 
 def main():
     application = (
@@ -54,7 +50,6 @@ def main():
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CallbackQueryHandler(settings_button))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
     application.run_polling(allowed_updates=["message", "callback_query"])
 
 
