@@ -1,141 +1,142 @@
 import asyncio
 import logging
-import random
-from urllib.parse import quote
+import gc
+from io import BytesIO
 
-import httpx
-
-from app.config import (
-    IMAGE_GENERATION_ENDPOINT,
-    IMAGE_GENERATION_HEIGHT,
-    IMAGE_GENERATION_TIMEOUT,
-    IMAGE_GENERATION_WIDTH,
-    POLLINATIONS_API_KEY,
-)
+from app.llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
 
+class ImageGenerationError(RuntimeError):
+    """Исключение, возникающее при ошибках генерации изображения."""
+    pass
 
-class ImageGenerationError(Exception):
-    """Ошибка при обращении к сервису генерации картинок."""
+
+_pipeline = None
+_generation_lock = None
+
+def _get_lock():
+    global _generation_lock
+    if _generation_lock is None:
+        _generation_lock = asyncio.Lock()
+    return _generation_lock
+
+def _get_pipeline():
+    global _pipeline
+    if _pipeline is None:
+        try:
+            import torch
+            from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler
+
+            logger.info("Загрузка локальной модели DreamShaper (SD 1.5)...")
+            
+            device = "cpu"
+            dtype = torch.float32
+            
+            if torch.cuda.is_available():
+                device = "cuda"
+                dtype = torch.float16
+            elif torch.backends.mps.is_available():
+                device = "mps"
+                dtype = torch.float32  # MPS стабильнее работает с float32
+
+            # Используем Lykon/dreamshaper-8 (отличное качество и понимание промптов)
+            _pipeline = DiffusionPipeline.from_pretrained(
+                "Lykon/dreamshaper-8",
+                torch_dtype=dtype,
+                safety_checker=None
+            )
+
+            # Меняем планировщик на более быстрый, чтобы получать качество за меньшее число шагов
+            _pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(_pipeline.scheduler.config)
+
+            if device == "cuda":
+                try:
+                    _pipeline.enable_xformers_memory_efficient_attention()
+                    logger.info("Включено ускорение генерации через xformers")
+                except Exception:
+                    logger.info("Ускорение xformers недоступно (для CUDA рекомендуется: pip install xformers)")
+
+            _pipeline = _pipeline.to(device)
+
+            logger.info(f"Модель DreamShaper успешно загружена на {device}")
+        except ImportError as exc:
+            raise ImageGenerationError(
+                "Не установлены библиотеки для генерации. "
+                "Выполните: pip install diffusers transformers torch accelerate"
+            ) from exc
+        except Exception as exc:
+            logger.error("Ошибка при инициализации пайплайна: %s", exc)
+            raise ImageGenerationError(f"Ошибка загрузки модели: {exc}")
+
+    return _pipeline
+
+
+def _generate_sync(prompt: str) -> bytes:
+    import torch
+    try:
+        pipe = _get_pipeline()
+        logger.info("Начинаем локальную генерацию для запроса: %s", prompt)
+        
+        enhanced_prompt = (
+                        f"{prompt}, accurate depiction, matching the prompt, clear subject, "
+                        "well-defined details, coherent composition, realistic proportions"
+                        )
+
+        negative_prompt = (
+                            "blurry, low quality, distorted, deformed, bad anatomy, extra limbs, "
+                            "missing fingers, malformed, noisy, artifacts, text, watermark, oversaturated"
+                        )
+
+        # Возвращаем 512x512 (родное разрешение SD) и 20 шагов для нормальной геометрии
+        result = pipe(
+            prompt=enhanced_prompt,
+            negative_prompt=negative_prompt,
+            num_inference_steps=25,
+            guidance_scale=7.5,
+            height=512,
+            width=512
+        )
+        image = result.images[0]
+        
+        stream = BytesIO()
+        image.save(stream, format="PNG")
+        return stream.getvalue()
+    except Exception as exc:
+        logger.error("Ошибка при локальной генерации изображения: %s", exc)
+        raise ImageGenerationError(f"Ошибка генерации: {exc}")
+    finally:
+        # Принудительно очищаем память (VRAM/RAM), чтобы избежать крашей (OOM) операционной системы
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+        gc.collect()
 
 
 async def generate_image(prompt: str) -> bytes:
-    if not prompt:
-        raise ImageGenerationError("Пустой запрос.")
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": "https://pollinations.ai/",
-    }
-
-    endpoint = IMAGE_GENERATION_ENDPOINT.rstrip("/")
-    
-    if POLLINATIONS_API_KEY:
-        headers["Authorization"] = f"Bearer {POLLINATIONS_API_KEY}"
-        # Если есть ключ, но адрес публичный -> меняем на enter
-        if "image.pollinations.ai" in endpoint:
-            endpoint = endpoint.replace("image.pollinations.ai", "enter.pollinations.ai")
-            logger.info("Using authenticated endpoint: %s", endpoint)
-
-    # Строим URL запроса
-    url = f"{endpoint}/{quote(prompt)}"
-
-    # Параметры генерации
-    params = {
-        "model": "flux",
-        "nologo": "true",
-        "seed": random.randint(0, 1000000)
-    }
-    if IMAGE_GENERATION_WIDTH and IMAGE_GENERATION_WIDTH > 0:
-        params["width"] = IMAGE_GENERATION_WIDTH
-    if IMAGE_GENERATION_HEIGHT and IMAGE_GENERATION_HEIGHT > 0:
-        params["height"] = IMAGE_GENERATION_HEIGHT
-
-    timeout = httpx.Timeout(
-        connect=10.0,
-        read=IMAGE_GENERATION_TIMEOUT,
-        write=20.0,
-        pool=30.0,
+    """
+    Генерирует изображение асинхронно через локальную модель DreamShaper.
+    Работает в отдельном потоке (to_thread), чтобы не блокировать бота.
+    """
+    # Переводим промпт на английский, так как Stable Diffusion работает с ним лучше
+    translation_prompt = (
+        "Translate the following text into an English prompt for Stable Diffusion. "
+        "Keep it concise, descriptive, and return ONLY the English translation without quotes or extra text.\n\n"
+        f"Text: {prompt}"
     )
+    
+    try:
+        english_prompt = await chat_completion(
+            [{"role": "user", "content": translation_prompt}],
+            max_tokens=200,
+            temperature=0.3
+        )
+        english_prompt = (english_prompt or prompt).strip()
+        logger.info("Оригинальный промпт: %s | Промпт для SD: %s", prompt, english_prompt)
+    except Exception as exc:
+        logger.warning("Не удалось перевести промпт, используем оригинал: %s", exc)
+        english_prompt = prompt
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-        last_exc: Exception | None = None
-
-        for attempt in range(3):
-            try:
-                # Копируем заголовки, чтобы не менять глобальные (важно для fallback)
-                req_headers = headers.copy()
-                
-                # Если переключились на публичный URL (fallback), убираем авторизацию
-                if "image.pollinations.ai" in url:
-                    req_headers.pop("Authorization", None)
-                
-                logger.info(
-                    "Sending image request to %s (attempt %d/3, model=%s)...",
-                    url,
-                    attempt + 1,
-                    params.get("model")
-                )
-
-                response = await client.get(url, params=params, headers=req_headers)
-
-                # ==== SUCCESS ====
-                if response.status_code == 200:
-                    content_type = response.headers.get("content-type", "").lower()
-
-                    # Проверяем, что это изображение
-                    if "image" in content_type or "application/octet-stream" in content_type:
-                        if not response.content:
-                            raise ImageGenerationError("Сервис вернул пустой файл.")
-                        return response.content
-
-                    # Если вернулся JSON (например, loading)
-                    if "application/json" in content_type and "loading" in response.text.lower():
-                        await asyncio.sleep(2 + attempt + random.random())
-                        continue
-
-                    # Если вернулся HTML при авторизованном запросе — пробуем публичный эндпоинт
-                    if POLLINATIONS_API_KEY and "enter.pollinations.ai" in url:
-                        logger.warning("Auth endpoint failed (returned HTML). Fallback to public.")
-                        url = url.replace("enter.pollinations.ai", "image.pollinations.ai")
-                        await asyncio.sleep(1)
-                        continue
-
-                    # Любой другой текст/HTML
-                    raise ImageGenerationError(
-                        f"Сервис вернул не изображение, content-type={content_type}. Ответ: {response.text[:300]}"
-                    )
-
-                # ==== retry-friendly статусы ====
-                if response.status_code in (500, 502, 503, 504, 529):
-                    # Переключаем модель на turbo, если flux падает
-                    if attempt == 1 and params.get("model") == "flux":
-                        logger.info("Switching model to 'turbo' due to server errors")
-                        params["model"] = "turbo"
-
-                    await asyncio.sleep(2 + attempt + random.random())
-                    continue
-
-                # ==== фатальные клиентские ошибки ====
-                if response.status_code in (400, 401, 403, 404):
-                    raise ImageGenerationError(
-                        f"Сервис вернул {response.status_code}: {response.text}"
-                    )
-
-            except httpx.HTTPError as exc:
-                logger.warning("Request failed: %s", exc)
-                last_exc = exc
-
-                # Переключаем модель на turbo при проблемах с соединением
-                if attempt == 1 and params.get("model") == "flux":
-                    logger.info("Switching model to 'turbo' due to connection issues")
-                    params["model"] = "turbo"
-
-                if attempt == 2:
-                    raise ImageGenerationError(f"Сбой подключения: {exc}") from exc
-
-                await asyncio.sleep(2 + attempt + random.random())
-
-    # ==== UNKNOWN ERROR ====
-    raise ImageGenerationError(f"Неизвестная ошибка: {last_exc}")
+    async with _get_lock():
+        return await asyncio.to_thread(_generate_sync, english_prompt)

@@ -120,6 +120,46 @@ def _strip_markdown_syntax(text):
     text = re.sub(r"(?m)^>\s?", "", text)
     return text
 
+
+def _fix_markdown_formatting(text):
+    if not text:
+        return text
+    
+    if text.count("```") % 2 != 0:
+        text += "\n```"
+
+    lines = text.split('\n')
+    in_code_block = False
+    in_table = False
+    new_lines = []
+    
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('```'):
+            if in_table:
+                new_lines.append('```')
+                in_table = False
+            in_code_block = not in_code_block
+            new_lines.append(line)
+            continue
+        
+        is_table_row = bool(re.match(r'^\s*\|.+\|\s*$', line)) and line.count('|') >= 2
+        
+        if not in_code_block and is_table_row:
+            if not in_table:
+                new_lines.append('```text')
+                in_table = True
+            new_lines.append(line)
+        else:
+            if in_table:
+                new_lines.append('```')
+                in_table = False
+            new_lines.append(line)
+    
+    if in_table:
+        new_lines.append('```')
+    return '\n'.join(new_lines)
+
 async def _format_response_with_llm(prompt, response_text, settings):
     if not settings.get("response_format") or not settings.get("format_with_llm"):
         return response_text
@@ -201,11 +241,15 @@ async def _postprocess_response(prompt, response_text, settings):
     if settings.get("strip_markdown"):
         text = _strip_markdown_syntax(text)
         return text, None
+        
+    if settings.get("max_response_chars", 0) > 0:
+        text = _trim_to_char_limit(text, settings["max_response_chars"])
+        
+    text = _fix_markdown_formatting(text)
+    
     parse_mode = None
     if settings.get("render_markdown") and _looks_like_markdown(text):
         parse_mode = "Markdown"
-    if settings.get("max_response_chars", 0) > 0:
-        text = _trim_to_char_limit(text, settings["max_response_chars"])
     return text, parse_mode
 
 def _max_prompt_tokens(max_tokens):

@@ -4,3 +4,9 @@ langchain-openai==0.1.22
 python-dotenv==1.0.1
 python-telegram-bot==20.8
 aiofiles
+aiogram
+openai-whisper
+diffusers
+transformers
+torch
+accelerate

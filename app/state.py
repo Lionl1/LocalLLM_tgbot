@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import random
 
 import aiofiles
 from app.config import (
@@ -32,6 +33,7 @@ ALLOWED_USER_IDS = _normalize_allowed_user_ids(_RAW_ALLOWED_USER_IDS)
 
 CHAT_MEMORY = {}
 CHAT_SETTINGS = {}
+CHAT_SEEN_USERS = {}
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CHAT_SETTINGS_FILE = DATA_DIR / "chat_settings.json"
@@ -102,6 +104,19 @@ async def reset_settings(chat_id):
     CHAT_SETTINGS.pop(chat_id, None)
     await persist_settings()
 
+
+def mark_user_seen(chat_id, user_id, username, first_name):
+    if chat_id not in CHAT_SEEN_USERS:
+        CHAT_SEEN_USERS[chat_id] = {}
+    CHAT_SEEN_USERS[chat_id][user_id] = {"username": username, "first_name": first_name}
+
+
+def get_random_seen_user(chat_id, exclude_user_id=None):
+    users = CHAT_SEEN_USERS.get(chat_id, {})
+    choices = [u for uid, u in users.items() if uid != exclude_user_id]
+    if choices:
+        return random.choice(choices)
+    return None
 
 def clear_history(chat_id):
     CHAT_MEMORY.pop(chat_id, None)

@@ -94,8 +94,10 @@ def _is_triggered(update, text, bot_id, bot_username, trigger_word):
 
 
 def _extract_prompt(text, bot_username, trigger_word):
-    prompt = _strip_trigger(text, trigger_word)
-    prompt = _strip_bot_mention(prompt, bot_username)
+    prompt = text
+    for _ in range(2):
+        prompt = _strip_trigger(prompt, trigger_word)
+        prompt = _strip_bot_mention(prompt, bot_username)
     return prompt.strip()
 
 
@@ -103,8 +105,6 @@ def _get_reply_text(message):
     if not message or not message.reply_to_message:
         return ""
     reply = message.reply_to_message
-    if reply.from_user and reply.from_user.is_bot:
-        return ""
     text = reply.text or reply.caption or ""
     return text.strip()
 
@@ -147,17 +147,26 @@ def _get_command_text(message_text):
 def _split_message(text, limit=MAX_TELEGRAM_MESSAGE):
     chunks = []
     remaining = text or ""
+    safe_limit = limit - 10  # Оставляем запас символов под авто-закрытие тегов
     while remaining:
         if len(remaining) <= limit:
             chunks.append(remaining)
             break
-        split_at = remaining.rfind("\n", 0, limit)
+            
+        split_at = remaining.rfind("\n", 0, safe_limit)
         if split_at == -1:
-            split_at = remaining.rfind(" ", 0, limit)
-        if split_at == -1 or split_at < limit // 2:
-            split_at = limit
+            split_at = remaining.rfind(" ", 0, safe_limit)
+        if split_at == -1 or split_at < safe_limit // 2:
+            split_at = safe_limit
+            
         chunk = remaining[:split_at].rstrip()
         remaining = remaining[split_at:].lstrip()
+        
+        # Если кусок обрывается посреди блока кода, закрываем его тут и открываем в следующем
+        if chunk.count("```") % 2 != 0:
+            chunk += "\n```"
+            remaining = "```\n" + remaining
+            
         if chunk:
             chunks.append(chunk)
     return chunks
@@ -251,7 +260,9 @@ _SEARCH_CONTEXT_WORDS = [
     "в веб",
 ]
 _SEARCH_REMOVAL_WORDS = _SEARCH_ACTION_WORDS + _SEARCH_CONTEXT_WORDS + _IMAGE_POLITE_WORDS
-_SEARCH_REMOVAL_REGEX = re.compile("|".join(re.escape(word) for word in _SEARCH_REMOVAL_WORDS), re.IGNORECASE)
+_sorted_search_removal = sorted(_SEARCH_REMOVAL_WORDS, key=len, reverse=True)
+_search_pattern = r"\b(?:" + "|".join(re.escape(word) for word in _sorted_search_removal) + r")\w*"
+_SEARCH_REMOVAL_REGEX = re.compile(_search_pattern, re.IGNORECASE)
 
 
 def detect_search_request(text):

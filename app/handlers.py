@@ -1,4 +1,8 @@
 import logging
+import random
+import os
+import tempfile
+import asyncio
 from io import BytesIO
 
 from telegram import BotCommand
@@ -9,38 +13,36 @@ from telegram.ext import ContextTypes
 from app.config import (
     CONTEXT_LIMIT_TOKENS,
     IMAGE_GENERATION_ENABLED,
+    RANDOM_PARTICIPATION_PROBABILITY,
+    RANDOM_QUESTION_PROBABILITY,
+    TOKEN_CHAR_RATIO,
     WEB_SEARCH_ENABLED,
     WEB_SEARCH_MAX_RESULTS,
 )
-from app.llm_client import LLMRequestError, chat_completion
-from app.pipeline import (
-    _build_flat_fallback_messages,
-    _build_messages,
-    _compose_system_prompt,
-    _context_limit_exceeded,
-    _is_context_overflow_error,
-    _is_message_header_error,
-    _postprocess_response,
-    _trim_history_to_fit,
+from app.llm_service import (
+    generate_random_question,
+    process_chat_request,
+    summarize_search_results,
 )
 from app.search_client import WebSearchError, search_web
 from app.image_client import ImageGenerationError, generate_image
+from app.audio_client import transcribe_audio
 from app.state import (
     apply_pending_action,
     append_history,
     clear_history,
     clear_pending,
-    get_history,
     get_settings,
+    get_random_seen_user,
     is_allowed_user,
     load_persisted_chat_settings,
+    mark_user_seen,
     reset_settings,
     persist_settings,
-    set_history,
     set_pending,
-    trim_oldest_history,
 )
 from app.text_utils import (
+    _estimate_tokens,
     _extract_prompt,
     _extract_web_query,
     _format_search_results,
@@ -136,18 +138,30 @@ async def _safe_send_message(bot, chat_id, text, parse_mode=None):
 
 
 async def _generate_and_send_image(message, prompt):
+    status_msg = None
     try:
+        status_msg = await _safe_reply_text(message, "⏳ Запрос добавлен в очередь на генерацию. Пожалуйста, подождите...")
         await message.chat.send_action(action=ChatAction.UPLOAD_PHOTO)
         image_bytes = await generate_image(prompt)
-    except ImageGenerationError as exc:
+        if not image_bytes:
+            raise ImageGenerationError("Получен пустой файл от сервиса.")
+            
+    except Exception as exc:
+        # Ловим любые ошибки, так как функция теперь работает в фоне и мы не должны ронять таску
         logger.exception("Image generation failed: %s", exc)
         error_msg = "Не удалось сгенерировать изображение."
         if "500" in str(exc) or "503" in str(exc):
             error_msg += " Сервис генерации временно перегружен."
-        await _safe_reply_text(
-            message,
-            error_msg,
-        )
+        if status_msg:
+            try:
+                await status_msg.edit_text(error_msg)
+            except Exception:
+                pass
+        else:
+            try:
+                await _safe_reply_text(message, error_msg)
+            except Exception:
+                pass
         return False
     stream = BytesIO(image_bytes)
     stream.name = "generated.png"
@@ -160,6 +174,7 @@ async def _generate_and_send_image(message, prompt):
         await message.reply_photo(
             photo=stream,
             caption=caption,
+            reply_to_message_id=message.message_id,
             read_timeout=60,
             write_timeout=60,
             connect_timeout=60,
@@ -172,12 +187,30 @@ async def _generate_and_send_image(message, prompt):
         await message.reply_document(
             document=stream,
             caption=caption + " (отправлено файлом из-за ошибки обработки)",
+            reply_to_message_id=message.message_id,
             read_timeout=60,
             write_timeout=60,
             connect_timeout=60,
         )
 
+    if status_msg:
+        try:
+            await status_msg.delete()
+        except Exception:
+            pass
+
     return True
+
+
+def _truncate_web_text(text, max_tokens):
+    if not text or _estimate_tokens(text) <= max_tokens:
+        return text
+    char_limit = max_tokens * TOKEN_CHAR_RATIO
+    truncated = text[:char_limit]
+    cut_at = max(truncated.rfind("\n"), truncated.rfind(" "))
+    if cut_at > char_limit // 2:
+        truncated = truncated[:cut_at]
+    return truncated.strip() + "\n\n... [результаты обрезаны из-за лимита контекста]"
 
 
 async def start_command(update, context):
@@ -235,7 +268,23 @@ async def search_command(update, context):
         await _safe_reply_text(update.message, "Ничего не нашел по этому запросу.")
         return
     text = _format_search_results(results, query)
-    chunks = _split_message(text)
+    
+    chat_id = update.effective_chat.id
+    settings = get_settings(chat_id)
+    
+    safe_tokens = max(500, CONTEXT_LIMIT_TOKENS - settings.get("max_tokens", 512) - 500)
+    text = _truncate_web_text(text, safe_tokens)
+    
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    response_text = await summarize_search_results(query, text, settings)
+        
+    if not response_text:
+        response_text = text
+        
+    append_history(chat_id, "user", f"/search {query}")
+    append_history(chat_id, "assistant", response_text)
+        
+    chunks = _split_message(response_text)
     await _safe_reply_text(update.message, chunks[0])
     for chunk in chunks[1:]:
         await _safe_send_message(context.bot, update.effective_chat.id, chunk)
@@ -253,7 +302,8 @@ async def image_command(update, context):
             update.message, "Опиши, что нарисовать: /image <описание>."
         )
         return
-    await _generate_and_send_image(update.message, prompt)
+    # Запускаем в фоне, чтобы бот мог сразу отвечать на другие сообщения
+    asyncio.create_task(_generate_and_send_image(update.message, prompt))
 
 
 async def reset_command(update, context):
@@ -507,14 +557,50 @@ async def post_init(application):
 
 
 async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
+    if not update.message:
+        return
+        
+    audio_obj = update.message.voice or update.message.audio or update.message.video_note
+    if not update.message.text and not audio_obj:
         return
 
-    text = update.message.text
+    text = update.message.text or ""
+
+    if audio_obj:
+        if not await _ensure_update_allowed(update, context):
+            return
+        await update.message.chat.send_action(action=ChatAction.TYPING)
+        try:
+            voice_file = await context.bot.get_file(audio_obj.file_id)
+            with tempfile.NamedTemporaryFile(suffix=".tmp", delete=False) as temp_audio:
+                temp_path = temp_audio.name
+            
+            await voice_file.download_to_drive(temp_path)
+            status_msg = await _safe_reply_text(update.message, "⏳ Распознаю аудио...")
+            
+            transcribed_text = await transcribe_audio(temp_path)
+            os.remove(temp_path)
+            
+            if not transcribed_text:
+                await status_msg.edit_text("❌ Не удалось распознать голосовое сообщение.")
+                return
+                
+            text = transcribed_text
+            await status_msg.edit_text(f"🎤 Распознано:\n{text}")
+        except Exception as exc:
+            logger.exception("Voice processing failed: %s", exc)
+            await _safe_reply_text(update.message, "Ошибка обработки голосового сообщения.")
+            return
+
     bot_username = context.bot.username or ""
     chat_id = update.effective_chat.id
     if not await _ensure_update_allowed(update, context):
         return
+        
+    user = update.effective_user
+    if user and not user.is_bot:
+        mark_user_seen(chat_id, user.id, user.username, user.first_name)
+        
     settings = get_settings(chat_id)
     pending_action = settings.get("pending_action")
     pending_user_id = settings.get("pending_user_id")
@@ -535,7 +621,8 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     if IMAGE_GENERATION_ENABLED:
         image_description = detect_image_request(text)
         if image_description:
-            await _generate_and_send_image(update.message, image_description)
+            # Запускаем в фоне для авто-определенных триггеров
+            asyncio.create_task(_generate_and_send_image(update.message, image_description))
             return
     web_context = ""
     web_results_text = ""
@@ -551,8 +638,11 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                     await _safe_reply_text(update.message, "Ничего не нашел по этому запросу.")
                     return
                 web_results_text = _format_search_results(results, search_query)
+                safe_tokens = max(500, CONTEXT_LIMIT_TOKENS - settings.get("max_tokens", 512) - 1000)
+                web_results_text = _truncate_web_text(web_results_text, safe_tokens)
                 web_context = (
-                    "Данные из интернета (результаты поиска; проверь факты):\n"
+                    "Данные из интернета (результаты поиска; проверь факты). "
+                    "Сделай выжимку и ответь на запрос. Не приводи список ссылок, если строго не требуется:\n"
                     f"{web_results_text}"
                 )
                 performed_web_search = True
@@ -563,7 +653,23 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
 
     trigger_word = settings["trigger_word"]
     if not _is_triggered(update, text, context.bot.id, bot_username, trigger_word) and not performed_web_search:
-        return
+        if update.effective_chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
+            if random.random() < RANDOM_QUESTION_PROBABILITY:
+                target_user = get_random_seen_user(chat_id, exclude_user_id=user.id if user else None)
+                if target_user:
+                    await update.message.chat.send_action(action=ChatAction.TYPING)
+                    response_text = await generate_random_question(target_user, settings)
+                    if response_text:
+                        chunks = _split_message(response_text)
+                        for chunk in chunks:
+                            await _safe_send_message(context.bot, chat_id, chunk)
+                        append_history(chat_id, "assistant", response_text)
+                return
+            
+            if random.random() >= RANDOM_PARTICIPATION_PROBABILITY:
+                return
+        else:
+            return
 
     prompt = _extract_prompt(text, bot_username, trigger_word)
     reply_text = _get_reply_text(update.message)
@@ -599,8 +705,11 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             await _safe_reply_text(update.message, "Ничего не нашел по этому запросу.")
             return
         web_results_text = _format_search_results(results, web_query)
+        safe_tokens = max(500, CONTEXT_LIMIT_TOKENS - settings.get("max_tokens", 512) - 1000)
+        web_results_text = _truncate_web_text(web_results_text, safe_tokens)
         web_context = (
-            "Данные из интернета (результаты поиска; проверь факты):\n"
+            "Данные из интернета (результаты поиска; проверь факты). "
+            "Сделай выжимку и ответь на запрос. Не приводи список ссылок, если строго не требуется:\n"
             f"{web_results_text}"
         )
 
@@ -613,127 +722,16 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         prompt = reset_remainder
         reply_text = ""
 
-    history = list(get_history(chat_id))
-    history, trimmed, messages = await _trim_history_to_fit(
-        history, prompt, reply_text, settings, web_context
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    response_text, parse_mode, error_msg = await process_chat_request(
+        chat_id, prompt, reply_text, settings, web_context, web_results_text
     )
-    if trimmed:
-        set_history(chat_id, history)
-    if _context_limit_exceeded(messages, settings["max_tokens"]):
-        await _safe_reply_text(
-            update.message,
-            "Запрос слишком длинный для контекста модели. Сократи текст."
-        )
+    
+    if error_msg:
+        await _safe_reply_text(update.message, error_msg)
         return
 
-    attempts = 0
-    await update.message.chat.send_action(action=ChatAction.TYPING)
-    max_attempts = max(1, len(history) // 2 + 1)
-    while True:
-        try:
-            response_text = await chat_completion(
-                messages,
-                max_tokens=settings["max_tokens"],
-                temperature=settings["temperature"],
-            )
-            break
-        except LLMRequestError as exc:
-            if history and _is_context_overflow_error(exc) and attempts < max_attempts:
-                logger.info("Context overflow, trimming history for chat %s", chat_id)
-                history = trim_oldest_history(history)
-                set_history(chat_id, history)
-                messages = _build_messages(
-                    history, prompt, reply_text, settings, web_context
-                )
-                attempts += 1
-                if history:
-                    continue
-                attempts = max_attempts
-            if _is_message_header_error(exc):
-                logger.warning(
-                    "Chat template error, retrying with minimal prompt for chat %s",
-                    chat_id,
-                )
-                try:
-                    response_text = await chat_completion(
-                        _build_flat_fallback_messages(
-                            history, prompt, reply_text, settings, web_context
-                        ),
-                        max_tokens=settings["max_tokens"],
-                        temperature=settings["temperature"],
-                    )
-                    break
-                except Exception as fallback_exc:
-                    logger.exception("Fallback LLM request failed: %s", fallback_exc)
-                    await _safe_reply_text(
-                        update.message,
-                        "Не удалось получить ответ от локальной LLM."
-                    )
-                    return
-            logger.exception("LLM request failed: %s", exc)
-            await _safe_reply_text(update.message, "Не удалось получить ответ от локальной LLM.")
-            return
-        except Exception as exc:
-            logger.exception("LLM request failed: %s", exc)
-            await _safe_reply_text(update.message, "Не удалось получить ответ от локальной LLM.")
-            return
-
-    response_text = (response_text or "").strip()
-    parse_mode = None
-    if response_text:
-        response_text, parse_mode = await _postprocess_response(
-            prompt, response_text, settings
-        )
-    if not response_text:
-        logger.info("Empty LLM response, retrying without history for chat %s", chat_id)
-        try:
-            retry_system_prompt = _compose_system_prompt(settings)
-            if web_context:
-                retry_system_prompt = f"{retry_system_prompt}\n\n{web_context}"
-            retry_messages = [{"role": "system", "content": retry_system_prompt}]
-            retry_messages.append(
-                {
-                    "role": "user",
-                    "content": f"{prompt}\n\nОтветь одним-двумя предложениями.",
-                }
-            )
-            response_text = await chat_completion(
-                retry_messages,
-                max_tokens=settings["max_tokens"],
-                temperature=settings["temperature"],
-            )
-        except Exception as exc:
-            logger.exception("LLM request failed: %s", exc)
-            await _safe_reply_text(update.message, "Не удалось получить ответ от локальной LLM.")
-            return
-        response_text = (response_text or "").strip()
-        if response_text:
-            response_text, parse_mode = await _postprocess_response(
-                prompt, response_text, settings
-            )
-        if not response_text:
-            if web_results_text:
-                fallback = (
-                    "Модель вернула пустой ответ. Вот результаты поиска:\n"
-                    f"{web_results_text}"
-                )
-                chunks = _split_message(fallback)
-                await _safe_reply_text(update.message, chunks[0])
-                for chunk in chunks[1:]:
-                    await _safe_send_message(context.bot, chat_id, chunk)
-                return
-            await _safe_reply_text(
-                update.message,
-                "Модель вернула пустой ответ. Попробуй переформулировать."
-            )
-            return
-
-    append_history(chat_id, "user", prompt)
-    append_history(chat_id, "assistant", response_text)
-
     chunks = _split_message(response_text)
-    if parse_mode and len(chunks) > 1:
-        parse_mode = None
     if not chunks:
         await _safe_reply_text(
             update.message,

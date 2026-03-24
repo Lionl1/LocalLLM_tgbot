@@ -49,7 +49,9 @@ def main():
     application.add_handler(CommandHandler("resetsettings", reset_settings_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CallbackQueryHandler(settings_button))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.add_handler(
+        MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE) & ~filters.COMMAND, handle_message)
+    )
     application.run_polling(allowed_updates=["message", "callback_query"])
 
 
