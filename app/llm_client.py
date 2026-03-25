@@ -66,12 +66,19 @@ def _extract_status_code(exc):
     return None
 
 
-async def chat_completion(messages, model=None, max_tokens=None, temperature=None):
+async def chat_completion(messages, model=None, max_tokens=None, temperature=None, tools=None, tool_choice=None):
     llm = _build_llm(
         model or OPENAI_MODEL,
         max_tokens if max_tokens is not None else MAX_TOKENS,
         temperature if temperature is not None else TEMPERATURE,
     )
+
+    if tools:
+        kwargs = {}
+        if tool_choice:
+            kwargs["tool_choice"] = tool_choice
+        llm = llm.bind_tools(tools, **kwargs)
+
     try:
         response = await llm.ainvoke(_to_lc_messages(messages))
     except Exception as exc:
@@ -81,4 +88,7 @@ async def chat_completion(messages, model=None, max_tokens=None, temperature=Non
         status_code = _extract_status_code(exc) or 0
         logger.error("LLM error %s: %s", status_code, detail)
         raise LLMRequestError(status_code, detail) from exc
+
+    if tools:
+        return getattr(response, "content", ""), getattr(response, "tool_calls", [])
     return getattr(response, "content", "")

@@ -1,5 +1,5 @@
 import logging
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, MessageHandler, ChatMemberHandler, filters
 from app.config import TELEGRAM_BOT_TOKEN
 from app.handlers import (
     cancel_command,
@@ -19,7 +19,9 @@ from app.handlers import (
     settings_button,
     settings_command,
     start_command,
+    web_app_data_handler,
     toggle_syntax_command,
+    chat_member_handler,
 )
 
 logging.basicConfig(
@@ -50,9 +52,13 @@ def main():
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(CallbackQueryHandler(settings_button))
     application.add_handler(
+        MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler)
+    )
+    application.add_handler(
         MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE) & ~filters.COMMAND, handle_message)
     )
-    application.run_polling(allowed_updates=["message", "callback_query"])
+    application.add_handler(ChatMemberHandler(chat_member_handler, ChatMemberHandler.MY_CHAT_MEMBER))
+    application.run_polling(allowed_updates=["message", "callback_query", "my_chat_member"])
 
 
 if __name__ == "__main__":

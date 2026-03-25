@@ -38,16 +38,14 @@ def _get_pipeline():
                 dtype = torch.float16
             elif torch.backends.mps.is_available():
                 device = "mps"
-                dtype = torch.float32  # MPS стабильнее работает с float32
+                dtype = torch.float32
 
-            # Используем Lykon/dreamshaper-8 (отличное качество и понимание промптов)
             _pipeline = DiffusionPipeline.from_pretrained(
-                "Lykon/dreamshaper-8",
+                "segmind/tiny-sd",
                 torch_dtype=dtype,
                 safety_checker=None
             )
 
-            # Меняем планировщик на более быстрый, чтобы получать качество за меньшее число шагов
             _pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(_pipeline.scheduler.config)
 
             if device == "cuda":
@@ -88,14 +86,13 @@ def _generate_sync(prompt: str) -> bytes:
                             "missing fingers, malformed, noisy, artifacts, text, watermark, oversaturated"
                         )
 
-        # Возвращаем 512x512 (родное разрешение SD) и 20 шагов для нормальной геометрии
         result = pipe(
             prompt=enhanced_prompt,
             negative_prompt=negative_prompt,
-            num_inference_steps=25,
-            guidance_scale=7.5,
-            height=512,
-            width=512
+            num_inference_steps=15,
+            guidance_scale=7,
+            height=256,
+            width=256
         )
         image = result.images[0]
         
@@ -106,7 +103,6 @@ def _generate_sync(prompt: str) -> bytes:
         logger.error("Ошибка при локальной генерации изображения: %s", exc)
         raise ImageGenerationError(f"Ошибка генерации: {exc}")
     finally:
-        # Принудительно очищаем память (VRAM/RAM), чтобы избежать крашей (OOM) операционной системы
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         elif torch.backends.mps.is_available():
@@ -119,7 +115,6 @@ async def generate_image(prompt: str) -> bytes:
     Генерирует изображение асинхронно через локальную модель DreamShaper.
     Работает в отдельном потоке (to_thread), чтобы не блокировать бота.
     """
-    # Переводим промпт на английский, так как Stable Diffusion работает с ним лучше
     translation_prompt = (
         "Translate the following text into an English prompt for Stable Diffusion. "
         "Keep it concise, descriptive, and return ONLY the English translation without quotes or extra text.\n\n"

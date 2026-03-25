@@ -40,6 +40,11 @@ def _compose_system_prompt(settings):
         parts.append(
             f"Ограничение: не более {settings['max_response_chars']} символов."
         )
+    if settings.get("voice_response"):
+        parts.append(
+            "Твой ответ будет озвучен голосом. Отвечай кратко, емко и в разговорном стиле. "
+            "Избегай длинных списков, кусков кода и сложного форматирования."
+        )
     return "\n\n".join(parts)
 
 def _build_messages(history, prompt, reply_text, settings, web_context=""):
@@ -175,6 +180,11 @@ async def _format_response_with_llm(prompt, response_text, settings):
         instructions.append(
             f"Ограничение: не более {settings['max_response_chars']} символов."
         )
+    if settings.get("voice_response"):
+        instructions.append(
+            "Твой ответ будет озвучен голосом. Отвечай кратко, емко и в разговорном стиле. "
+            "Избегай длинных списков, кусков кода и сложного форматирования."
+        )
     requirements = "\n\n".join(instructions)
     user_content = (
         "Соблюдай требования и формат. Не добавляй новых фактов и не меняй смысл. "
@@ -283,28 +293,22 @@ async def _trim_history_to_fit(history, prompt, reply_text, settings, web_contex
     trimmed = False
     messages = _build_messages(history, prompt, reply_text, settings, web_context)
     
-    # Если контекст уже влезает — возвращаем как есть
     if not _context_limit_exceeded(messages, settings["max_tokens"]):
         return history, trimmed, messages
 
-    # Проверяем, есть ли уже саммари в начале истории (System message с префиксом)
     existing_summary_text = ""
     start_idx = 0
     if history and history[0].get("role") == "system" and history[0]["content"].startswith(_SUMMARY_PREFIX):
         existing_summary_text = history[0]["content"].replace(_SUMMARY_PREFIX, "").strip()
-        start_idx = 1  # Пропускаем сообщение с саммари при нарезке, учтем его отдельно
+        start_idx = 1
 
-    # Работаем только с "живыми" сообщениями (без старого саммари)
     active_history = history[start_idx:]
 
-    # Попытка саммаризации, если есть что сжимать
     if len(active_history) > 1:
-        # Сжимаем старые 60% сообщений, оставляя свежие 40%
         split_idx = max(1, int(len(active_history) * 0.6))
         msgs_to_compress = active_history[:split_idx]
         recent_history = active_history[split_idx:]
 
-        # Формируем текст для LLM: Старое саммари + Старые сообщения
         text_block = ""
         if existing_summary_text:
             text_block += f"=== ТЕКУЩЕЕ САММАРИ ===\n{existing_summary_text}\n\n"
@@ -324,10 +328,8 @@ async def _trim_history_to_fit(history, prompt, reply_text, settings, web_contex
             }
             history = [summary_message] + recent_history
             trimmed = True
-            # Пересобираем сообщения с учетом саммари
             messages = _build_messages(history, prompt, reply_text, settings, web_context)
 
-    # Если даже с саммари всё равно не влезает (или саммари не удалось) — режем по старинке
     while history and _context_limit_exceeded(messages, settings["max_tokens"]):
         history = trim_oldest_history(history)
         trimmed = True

@@ -1,5 +1,4 @@
 import math
-import re
 
 from telegram.constants import ChatType
 
@@ -37,24 +36,6 @@ def _starts_with_prefix(text, prefix):
     stripped = _strip_leading(text)
     return _normalize(stripped).startswith(_normalize(prefix))
 
-
-def _extract_web_query(prompt):
-    stripped = _strip_leading(prompt)
-    normalized = _normalize(stripped)
-    for prefix in ("web:", "search:", "поиск:"):
-        if normalized.startswith(prefix):
-            query = stripped[len(prefix) :].strip(" \t\r\n,.:;—-")
-            return query, query
-    for prefix in (
-        "найди в интернете",
-        "найди в интернет",
-        "найди в интрнете",
-        "найди в сети",
-    ):
-        if normalized.startswith(prefix):
-            query = stripped[len(prefix) :].strip(" \t\r\n,.:;—-")
-            return query, query
-    return "", prompt
 
 
 def _format_search_results(results, query):
@@ -147,7 +128,7 @@ def _get_command_text(message_text):
 def _split_message(text, limit=MAX_TELEGRAM_MESSAGE):
     chunks = []
     remaining = text or ""
-    safe_limit = limit - 10  # Оставляем запас символов под авто-закрытие тегов
+    safe_limit = limit - 10
     while remaining:
         if len(remaining) <= limit:
             chunks.append(remaining)
@@ -162,7 +143,6 @@ def _split_message(text, limit=MAX_TELEGRAM_MESSAGE):
         chunk = remaining[:split_at].rstrip()
         remaining = remaining[split_at:].lstrip()
         
-        # Если кусок обрывается посреди блока кода, закрываем его тут и открываем в следующем
         if chunk.count("```") % 2 != 0:
             chunk += "\n```"
             remaining = "```\n" + remaining
@@ -187,90 +167,19 @@ def _estimate_messages_tokens(messages):
     return total
 
 
-_IMAGE_STRONG_ACTION_WORDS = [
-    "нарисуй",
-    "отрисуй",
+_TRANSCRIPTION_WORDS = [
+    "транскрибируй",
+    "расшифруй",
+    "распознай",
+    "переведи в текст",
+    "дай текст",
+    "напиши текст",
+    "что поют",
+    "что говорят",
 ]
-_IMAGE_WEAK_ACTION_WORDS = [
-    "сгенерируй",
-    "создай",
-    "сделай",
-    "придумай",
-    "построй",
-    "покажи",
-]
-_IMAGE_ACTION_WORDS = _IMAGE_STRONG_ACTION_WORDS + _IMAGE_WEAK_ACTION_WORDS
 
-_IMAGE_NOUN_WORDS = [
-    "картин",
-    "рисун",
-    "рисунк",
-    "фото",
-    "изображен",
-    "иллюстрац",
-    "арт",
-    "скетч",
-    "постер",
-]
-_IMAGE_POLITE_WORDS = ["пожалуйста", "пж", "плиз", "пжл"]
-_IMAGE_REMOVAL_WORDS = _IMAGE_ACTION_WORDS + _IMAGE_NOUN_WORDS + _IMAGE_POLITE_WORDS
-# Создаем регулярку, которая удаляет слова целиком, если они начинаются с корней из списка
-# Сортируем по длине, чтобы сначала пробовать длинные совпадения
-_sorted_removal = sorted(_IMAGE_REMOVAL_WORDS, key=len, reverse=True)
-_pattern = r"\b(?:" + "|".join(re.escape(word) for word in _sorted_removal) + r")\w*"
-_IMAGE_REMOVAL_REGEX = re.compile(_pattern, re.IGNORECASE)
-
-
-def detect_image_request(text):
+def detect_transcription_request(text):
     if not text:
-        return ""
+        return False
     normalized = _normalize(text)
-    
-    has_strong = any(action in normalized for action in _IMAGE_STRONG_ACTION_WORDS)
-    has_weak = any(action in normalized for action in _IMAGE_WEAK_ACTION_WORDS)
-    
-    if not has_strong and not has_weak:
-        return ""
-
-    has_noun = any(noun in normalized for noun in _IMAGE_NOUN_WORDS)
-    
-    # Если глагол слабый (напр. "создай", "сделай"), то обязательно нужно существительное ("картинку")
-    if not has_strong and not has_noun:
-        return ""
-        
-    cleaned = _IMAGE_REMOVAL_REGEX.sub(" ", text)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n,.:;—-")
-    return cleaned or text.strip()
-
-
-_SEARCH_ACTION_WORDS = [
-    "найди",
-    "поищи",
-    "проведи поиск",
-    "выполни поиск",
-    "покажи",
-    "узнай",
-    "поиск",
-]
-_SEARCH_CONTEXT_WORDS = [
-    "в интернете",
-    "в сети",
-    "в вебе",
-    "онлайн",
-    "в веб",
-]
-_SEARCH_REMOVAL_WORDS = _SEARCH_ACTION_WORDS + _SEARCH_CONTEXT_WORDS + _IMAGE_POLITE_WORDS
-_sorted_search_removal = sorted(_SEARCH_REMOVAL_WORDS, key=len, reverse=True)
-_search_pattern = r"\b(?:" + "|".join(re.escape(word) for word in _sorted_search_removal) + r")\w*"
-_SEARCH_REMOVAL_REGEX = re.compile(_search_pattern, re.IGNORECASE)
-
-
-def detect_search_request(text):
-    if not text:
-        return ""
-    normalized = _normalize(text)
-    if not any(action in normalized for action in _SEARCH_ACTION_WORDS):
-        return ""
-    cleaned = _SEARCH_REMOVAL_REGEX.sub(" ", text)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip(" \t\r\n,.:;—-")
-    return cleaned
+    return any(word in normalized for word in _TRANSCRIPTION_WORDS)

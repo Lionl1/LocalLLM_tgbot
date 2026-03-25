@@ -1,0 +1,14 @@
+services:
+  bot:
+    build: .
+    container_name: telegram-llm-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+      - bot_data:/app/data
+
+volumes:
+  hf_cache:
+  bot_data:

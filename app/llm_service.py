@@ -21,6 +21,52 @@ from app.state import (
 logger = logging.getLogger(__name__)
 
 
+async def format_transcribed_text(text, settings):
+    system_prompt = (
+        "Твоя задача — привести расшифрованный из аудио текст в аккуратный и читаемый вид. "
+        "Исправь опечатки, расставь знаки препинания и заглавные буквы, разбей на абзацы, если нужно. "
+        "В самом начале ответа обязательно добавь один эмодзи, который лучше всего отражает настроение, тон или эмоцию текста. "
+        "После эмодзи поставь пробел и напиши сам текст. "
+        "Не меняй смысл, не добавляй от себя лишней информации и сохрани оригинальный стиль речи."
+    )
+    
+    try:
+        response_text = await chat_completion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            max_tokens=settings.get("max_tokens", 1024),
+            temperature=0.1,
+        )
+        return (response_text or text).strip()
+    except Exception as exc:
+        logger.exception("LLM formatting failed for transcription: %s", exc)
+        return text
+
+
+async def summarize_transcription(text, settings):
+    system_prompt = (
+        "Твоя задача — выделить самые главные тезисы (summary) из предоставленного текста. "
+        "Сформулируй их в виде краткого и понятного списка (маркированного списка). "
+        "Не используй длинных вступлений, только суть."
+    )
+    
+    try:
+        response_text = await chat_completion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            max_tokens=settings.get("max_tokens", 512),
+            temperature=0.3,
+        )
+        return (response_text or "").strip()
+    except Exception as exc:
+        logger.exception("LLM summarization failed for transcription: %s", exc)
+        return ""
+
+
 async def summarize_search_results(query, text, settings):
     system_prompt = (
         "Твоя задача — обработать результаты веб-поиска и дать пользователю "

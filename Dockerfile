@@ -5,12 +5,19 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Добавляем инструменты для проверки сети
-RUN apt-get update && apt-get install -y curl iputils-ping ffmpeg && rm -rf /var/lib/apt/lists/*
+# Включаем компиляцию байткода для uv (немного ускоряет старт бота)
+ENV UV_COMPILE_BYTECODE=1
 
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Добавляем инструменты для проверки сети
+RUN apt-get update && apt-get install -y curl iputils-ping ffmpeg libsndfile1 libgomp1 && rm -rf /var/lib/apt/lists/*
+
+# Копируем бинарники uv из официального образа
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --no-install-project
 
 COPY . /app/
 
-CMD ["python", "main.py"]
+CMD ["uv", "run", "--no-sync", "python", "main.py"]

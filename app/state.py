@@ -34,11 +34,14 @@ ALLOWED_USER_IDS = _normalize_allowed_user_ids(_RAW_ALLOWED_USER_IDS)
 CHAT_MEMORY = {}
 CHAT_SETTINGS = {}
 CHAT_SEEN_USERS = {}
+LAST_RAW_TRANSCRIPTION = {}
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CHAT_SETTINGS_FILE = DATA_DIR / "chat_settings.json"
 
 DEFAULT_SETTINGS = {
+    "chat_title": "",
+    "added_by": None,
     "system_prompt": SYSTEM_PROMPT,
     "context_policy": CONTEXT_POLICY,
     "extra_prompt": "",
@@ -56,6 +59,7 @@ DEFAULT_SETTINGS = {
     "strip_markdown": STRIP_MARKDOWN,
     "pending_action": "",
     "pending_user_id": None,
+    "voice_response": False,
 }
 
 
@@ -100,6 +104,10 @@ def get_settings(chat_id):
     return settings
 
 
+def get_all_known_groups():
+    return [cid for cid in CHAT_SETTINGS.keys() if cid < 0]
+
+
 async def reset_settings(chat_id):
     CHAT_SETTINGS.pop(chat_id, None)
     await persist_settings()
@@ -117,6 +125,14 @@ def get_random_seen_user(chat_id, exclude_user_id=None):
     if choices:
         return random.choice(choices)
     return None
+
+
+def set_raw_transcription(chat_id, text):
+    LAST_RAW_TRANSCRIPTION[chat_id] = text
+
+
+def get_raw_transcription(chat_id):
+    return LAST_RAW_TRANSCRIPTION.get(chat_id, "Нет сохраненной транскрибации.")
 
 def clear_history(chat_id):
     CHAT_MEMORY.pop(chat_id, None)

@@ -1,7 +1,28 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+import urllib.parse
+import json
+from telegram import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
+from app.config import WEB_APP_URL
 
 
 def _format_settings(settings):
+    voice_state = settings.get('voice_response')
+    voice_labels = {
+        "female": "ВКЛ (Ксения)",
+        "male": "ВКЛ (Айдар)",
+        "kseniya": "ВКЛ (Ксения)",
+        "xenia": "ВКЛ (Ксения 2)",
+        "baya": "ВКЛ (Байя)",
+        "aidar": "ВКЛ (Айдар)",
+        "eugene": "ВКЛ (Евгений)",
+        "random": "ВКЛ (Случайный)"
+    }
+    if voice_state in voice_labels:
+        voice_label = voice_labels[voice_state]
+    elif voice_state:
+        voice_label = "ВКЛ"
+    else:
+        voice_label = "ВЫКЛ"
+
     lines = [
         "Текущие настройки:",
         f"Триггер: {settings['trigger_word']}",
@@ -16,35 +37,39 @@ def _format_settings(settings):
         ),
         f"Макс. ответ (tokens): {settings['max_tokens']}",
         f"Синтаксис: {'ВКЛ' if settings.get('check_syntax') else 'ВЫКЛ'}",
+        f"Голосовой ответ: {voice_label}",
     ]
     return "\n".join(lines)
 
 
-def _settings_keyboard():
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("Настроение", callback_data="set_mood"),
-                InlineKeyboardButton("Очистить настроение", callback_data="clear_mood"),
-            ],
-            [
-                InlineKeyboardButton("Доп. промпт", callback_data="set_prompt"),
-                InlineKeyboardButton("Очистить промпт", callback_data="clear_prompt"),
-            ],
-            [
-                InlineKeyboardButton("Лимит ответа", callback_data="set_max"),
-                InlineKeyboardButton("Триггер", callback_data="set_trigger"),
-            ],
-            [
-                InlineKeyboardButton(
-                    "Показать настройки", callback_data="show_settings"
-                ),
-                InlineKeyboardButton(
-                    "Сбросить настройки", callback_data="reset_settings"
-                ),
-            ],
-            [InlineKeyboardButton("Отмена", callback_data="cancel")],
-        ]
+def _settings_keyboard(manageable_chats=None, current_chat_id=None):
+    web_app_url = WEB_APP_URL 
+    if manageable_chats and current_chat_id:
+        payload = {
+            "current": current_chat_id,
+            "chats": []
+        }
+        for c in manageable_chats:
+            s = c["settings"]
+            voice_val = s.get("voice_response")
+            payload["chats"].append({
+                "id": c["id"],
+                "title": c["title"],
+                "tw": s.get("trigger_word", ""),
+                "md": s.get("mood", ""),
+                "ep": s.get("extra_prompt", ""),
+                "mt": s.get("max_tokens", 4096),
+                "vr": voice_val if voice_val else "false",
+                "cs": True if s.get("check_syntax") else False
+            })
+            
+        json_str = json.dumps(payload)
+        query_string = urllib.parse.urlencode({"config": json_str})
+        web_app_url = f"{web_app_url}?{query_string}"
+        
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton("⚙️ Открыть настройки", web_app=WebAppInfo(url=web_app_url))]],
+        resize_keyboard=True
     )
 
 
