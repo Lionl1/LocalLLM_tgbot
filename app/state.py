@@ -16,6 +16,9 @@ from app.config import (
     PLAIN_TEXT_OUTPUT,
     RENDER_MARKDOWN,
     RESPONSE_FORMAT,
+    RANDOM_QUESTIONS,
+    RANDOM_QUESTION_PROBABILITY,
+    RANDOM_PARTICIPATION_PROBABILITY,
     STRIP_MARKDOWN,
     SYSTEM_PROMPT,
     TEMPERATURE,
@@ -60,6 +63,9 @@ DEFAULT_SETTINGS = {
     "pending_action": "",
     "pending_user_id": None,
     "voice_response": False,
+    "random_questions": RANDOM_QUESTIONS,
+    "random_question_prob": RANDOM_QUESTION_PROBABILITY,
+    "random_participation_prob": RANDOM_PARTICIPATION_PROBABILITY,
 }
 
 

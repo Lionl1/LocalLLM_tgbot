@@ -38,6 +38,9 @@ def _format_settings(settings):
         f"Макс. ответ (tokens): {settings['max_tokens']}",
         f"Синтаксис: {'ВКЛ' if settings.get('check_syntax') else 'ВЫКЛ'}",
         f"Голосовой ответ: {voice_label}",
+        f"Случайные вопросы: {'ВКЛ' if settings.get('random_questions', True) else 'ВЫКЛ'}",
+        f"Вероятность вопроса: {settings.get('random_question_prob', 0)}",
+        f"Вероятность участия: {settings.get('random_participation_prob', 0)}",
     ]
     return "\n".join(lines)
 
@@ -60,7 +63,10 @@ def _settings_keyboard(manageable_chats=None, current_chat_id=None):
                 "ep": s.get("extra_prompt", ""),
                 "mt": s.get("max_tokens", 4096),
                 "vr": voice_val if voice_val else "false",
-                "cs": True if s.get("check_syntax") else False
+                "cs": True if s.get("check_syntax") else False,
+                "rq": True if s.get("random_questions", True) else False,
+                "rqp": s.get("random_question_prob", 0.000000000000001),
+                "rpp": s.get("random_participation_prob", 0.000000000000001)
             })
             
         json_str = json.dumps(payload)

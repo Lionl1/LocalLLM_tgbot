@@ -104,6 +104,22 @@
             <input type="checkbox" id="syntax"> Включить проверку синтаксиса
         </label>
     </div>
+
+    <div class="form-group">
+        <label class="checkbox-label">
+            <input type="checkbox" id="random_questions"> Разрешить случайные сообщения
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label for="random_question_prob">Вероятность генерации вопроса (от 0 до 1)</label>
+        <input type="number" id="random_question_prob" step="0.001" min="0" max="1" placeholder="Например: 0.05">
+    </div>
+
+    <div class="form-group">
+        <label for="random_participation_prob">Вероятность участия в диалоге (от 0 до 1)</label>
+        <input type="number" id="random_participation_prob" step="0.001" min="0" max="1" placeholder="Например: 0.1">
+    </div>
     
     <div class="form-group" style="margin-top: 24px;">
         <button id="reset_btn" style="background-color: var(--tg-theme-destructive-text-color, #ff3b30); color: #fff; width: 100%; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">

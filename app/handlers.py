@@ -801,6 +801,12 @@ async def web_app_data_handler(update, context: ContextTypes.DEFAULT_TYPE):
             settings["voice_response"] = payload.get("voice_response", False)
         if "check_syntax" in payload:
             settings["check_syntax"] = bool(payload.get("check_syntax", False))
+        if "random_questions" in payload:
+            settings["random_questions"] = bool(payload.get("random_questions", True))
+        if "random_question_prob" in payload:
+            settings["random_question_prob"] = float(payload.get("random_question_prob", RANDOM_QUESTION_PROBABILITY))
+        if "random_participation_prob" in payload:
+            settings["random_participation_prob"] = float(payload.get("random_participation_prob", RANDOM_PARTICIPATION_PROBABILITY))
             
         await persist_settings()
         
@@ -970,7 +976,10 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     trigger_word = settings["trigger_word"]
     if not _is_triggered(update, text, context.bot.id, bot_username, trigger_word):
         if update.effective_chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
-            if random.random() < RANDOM_QUESTION_PROBABILITY:
+            if not settings.get("random_questions", True):
+                return
+                
+            if random.random() < settings.get("random_question_prob", RANDOM_QUESTION_PROBABILITY):
                 target_user = get_random_seen_user(chat_id, exclude_user_id=user.id if user else None)
                 if target_user:
                     await update.message.chat.send_action(action=ChatAction.TYPING)
@@ -981,8 +990,8 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                             await _safe_send_message(context.bot, chat_id, chunk)
                         append_history(chat_id, "assistant", response_text)
                 return
-            
-            if random.random() >= RANDOM_PARTICIPATION_PROBABILITY:
+                
+            if random.random() >= settings.get("random_participation_prob", RANDOM_PARTICIPATION_PROBABILITY):
                 return
         else:
             return
