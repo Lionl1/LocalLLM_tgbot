@@ -8,42 +8,42 @@ from app.text_utils import _estimate_messages_tokens
 
 logger = logging.getLogger(__name__)
 
-_SUMMARY_PREFIX = "Краткое содержание предыдущего разговора:"
+_SUMMARY_PREFIX = "Summary of the previous conversation:"
 
 def _priority_instruction(settings):
     if settings.get("enforce_last_message_priority", True):
         return (
-            "Всегда отвечай на последний запрос пользователя. "
-            "Историю используй только если она напрямую связана с текущим запросом."
+            "Always answer the user's latest request. "
+            "Use prior history only when it is directly relevant to the current request."
         )
     return ""
 
 def _compose_system_prompt(settings):
     parts = [settings["system_prompt"]]
     if settings["context_policy"]:
-        parts.append(f"Правила контекста: {settings['context_policy']}")
+        parts.append(f"Context rules: {settings['context_policy']}")
     priority = _priority_instruction(settings)
     if priority:
         parts.append(priority)
     if settings.get("plain_text_output"):
         parts.append(
-            "Ответ по умолчанию без Markdown. "
-            "Если используешь Markdown (код, таблицы), сделай разметку валидной."
+            "Default to plain text without Markdown. "
+            "If you do use Markdown for code or tables, keep it valid."
         )
     if settings["extra_prompt"]:
-        parts.append(f"Дополнительные инструкции: {settings['extra_prompt']}")
+        parts.append(f"Additional instructions: {settings['extra_prompt']}")
     if settings["mood"]:
-        parts.append(f"Настроение ответа: {settings['mood']}")
+        parts.append(f"Reply mood: {settings['mood']}")
     if settings["response_format"]:
-        parts.append(f"Формат ответа: {settings['response_format']}")
+        parts.append(f"Response format: {settings['response_format']}")
     if settings["max_response_chars"] > 0:
         parts.append(
-            f"Ограничение: не более {settings['max_response_chars']} символов."
+            f"Limit: no more than {settings['max_response_chars']} characters."
         )
     if settings.get("voice_response"):
         parts.append(
-            "Твой ответ будет озвучен голосом. Отвечай кратко, емко и в разговорном стиле. "
-            "Избегай длинных списков, кусков кода и сложного форматирования."
+            "Your reply will be spoken aloud. Keep it concise, conversational, and easy to read aloud. "
+            "Avoid long lists, code blocks, and heavy formatting."
         )
     return "\n\n".join(parts)
 
@@ -57,7 +57,7 @@ def _build_messages(history, prompt, reply_text, settings, web_context=""):
         messages.append(
             {
                 "role": "user",
-                "content": f"Сообщение, на которое идет ответ:\n{reply_text}",
+                "content": f"Message being replied to:\n{reply_text}",
             }
         )
     messages.append({"role": "user", "content": prompt})
@@ -72,22 +72,22 @@ def _build_flat_fallback_messages(
     if priority:
         context_parts.append(priority)
     if history:
-        context_parts.append("История диалога:")
+        context_parts.append("Conversation history:")
         for message in history[-8:]:
             role = message.get("role", "user")
-            label = "Пользователь" if role == "user" else "Ассистент"
+            label = "User" if role == "user" else "Assistant"
             content = (message.get("content") or "").strip()
             if content:
                 context_parts.append(f"{label}: {content}")
     if reply_text:
-        context_parts.append("Сообщение, на которое идет ответ:")
+        context_parts.append("Message being replied to:")
         context_parts.append(reply_text)
     if web_context:
-        context_parts.append("Контекст из интернета:")
+        context_parts.append("Web context:")
         context_parts.append(web_context)
     context_block = "\n".join(context_parts).strip()
     if context_block:
-        user_content = f"{context_block}\n\nТекущий запрос:\n{prompt}"
+        user_content = f"{context_block}\n\nCurrent request:\n{prompt}"
     else:
         user_content = prompt
     return [
@@ -170,34 +170,34 @@ async def _format_response_with_llm(prompt, response_text, settings):
         return response_text
     instructions = [settings.get("system_prompt") or SYSTEM_PROMPT]
     if settings.get("context_policy"):
-        instructions.append(f"Правила контекста: {settings['context_policy']}")
+        instructions.append(f"Context rules: {settings['context_policy']}")
     if settings.get("extra_prompt"):
-        instructions.append(f"Дополнительные инструкции: {settings['extra_prompt']}")
+        instructions.append(f"Additional instructions: {settings['extra_prompt']}")
     if settings.get("mood"):
-        instructions.append(f"Настроение ответа: {settings['mood']}")
-    instructions.append(f"Формат ответа: {settings['response_format']}")
+        instructions.append(f"Reply mood: {settings['mood']}")
+    instructions.append(f"Response format: {settings['response_format']}")
     if settings.get("max_response_chars", 0) > 0:
         instructions.append(
-            f"Ограничение: не более {settings['max_response_chars']} символов."
+            f"Limit: no more than {settings['max_response_chars']} characters."
         )
     if settings.get("voice_response"):
         instructions.append(
-            "Твой ответ будет озвучен голосом. Отвечай кратко, емко и в разговорном стиле. "
-            "Избегай длинных списков, кусков кода и сложного форматирования."
+            "Your reply will be spoken aloud. Keep it concise, conversational, and easy to read aloud. "
+            "Avoid long lists, code blocks, and heavy formatting."
         )
     requirements = "\n\n".join(instructions)
     user_content = (
-        "Соблюдай требования и формат. Не добавляй новых фактов и не меняй смысл. "
-        "Если используешь Markdown, сделай разметку валидной.\n\n"
-        f"Требования:\n{requirements}\n\n"
-        f"Запрос:\n{prompt}\n\n"
-        f"Черновик ответа:\n{response_text}\n\n"
-        "Перепиши ответ строго по требованиям."
+        "Follow the requirements and target format. Do not add new facts and do not change the meaning. "
+        "If you use Markdown, keep it valid.\n\n"
+        f"Requirements:\n{requirements}\n\n"
+        f"Request:\n{prompt}\n\n"
+        f"Draft reply:\n{response_text}\n\n"
+        "Rewrite the reply so it strictly follows the requirements."
     )
     messages = [
         {
             "role": "system",
-            "content": "Ты редактор ответов. Перепиши ответ под заданную роль и формат.",
+            "content": "You are a response editor. Rewrite replies to match the requested role and format.",
         },
         {"role": "user", "content": user_content},
     ]
@@ -218,15 +218,15 @@ async def _fix_syntax_with_llm(text, settings):
         return text
     
     prompt = (
-        "Проверь следующий текст на наличие грамматических, орфографических и пунктуационных ошибок. "
-        "Исправь их, сохранив исходный стиль и структуру (включая Markdown). "
-        "Не меняй сленг, неологизмы и творческие обороты.\n"
-        "Верни ТОЛЬКО исправленный текст, без вступлений и пояснений.\n\n"
-        f"Текст:\n{text}"
+        "Check the following text for grammar, spelling, and punctuation errors. "
+        "Fix them while preserving the original style and structure, including Markdown. "
+        "Do not normalize slang, neologisms, or intentionally creative phrasing.\n"
+        "Return ONLY the corrected text, with no introduction or explanation.\n\n"
+        f"Text:\n{text}"
     )
     
     messages = [
-        {"role": "system", "content": "Ты корректор. Твоя задача — исправить грубые ошибки, сохраняя авторский стиль."},
+        {"role": "system", "content": "You are a proofreader. Fix obvious mistakes while preserving the author's style."},
         {"role": "user", "content": prompt}
     ]
     
@@ -270,12 +270,12 @@ def _context_limit_exceeded(messages, max_tokens):
 
 async def _generate_summary(text_to_summarize):
     prompt = (
-        "Твоя задача — обновить краткое содержание (summary) диалога.\n"
-        "1. Сохрани важные факты, имена и контекст из текущего саммари (если есть).\n"
-        "2. Добавь ключевую информацию из новых сообщений.\n"
-        "3. Будь предельно лаконичен, убирай воду и приветствия.\n\n"
-        "4. Учитывай шутки, сарказм и юмор, если они были.\n\n"
-        f"ТЕКСТ ДЛЯ АНАЛИЗА:\n{text_to_summarize}"
+        "Update the conversation summary.\n"
+        "1. Preserve important facts, names, and context from the existing summary, if any.\n"
+        "2. Add the key information from the new messages.\n"
+        "3. Be extremely concise and remove filler or greetings.\n"
+        "4. Preserve notable jokes, sarcasm, or humor when relevant.\n\n"
+        f"TEXT TO ANALYZE:\n{text_to_summarize}"
     )
     
     try:
@@ -311,9 +311,9 @@ async def _trim_history_to_fit(history, prompt, reply_text, settings, web_contex
 
         text_block = ""
         if existing_summary_text:
-            text_block += f"=== ТЕКУЩЕЕ САММАРИ ===\n{existing_summary_text}\n\n"
+            text_block += f"=== CURRENT SUMMARY ===\n{existing_summary_text}\n\n"
         
-        text_block += "=== НОВЫЕ СООБЩЕНИЯ ===\n"
+        text_block += "=== NEW MESSAGES ===\n"
         for msg in msgs_to_compress:
             role = "User" if msg.get("role") == "user" else "Assistant"
             text_block += f"{role}: {msg.get('content', '')}\n"

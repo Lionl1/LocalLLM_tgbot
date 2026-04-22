@@ -23,11 +23,12 @@ logger = logging.getLogger(__name__)
 
 async def format_transcribed_text(text, settings):
     system_prompt = (
-        "Твоя задача — привести расшифрованный из аудио текст в аккуратный и читаемый вид. "
-        "Исправь опечатки, расставь знаки препинания и заглавные буквы, разбей на абзацы, если нужно. "
-        "В самом начале ответа обязательно добавь один эмодзи, который лучше всего отражает настроение, тон или эмоцию текста. "
-        "После эмодзи поставь пробел и напиши сам текст. "
-        "Не меняй смысл, не добавляй от себя лишней информации и сохрани оригинальный стиль речи."
+        "Your task is to turn transcribed audio text into clean, readable text. "
+        "Fix obvious typos, punctuation, capitalization, and paragraph breaks when needed. "
+        "Start the answer with exactly one emoji that best matches the tone or emotion of the text. "
+        "After the emoji, add a space and then the corrected text. "
+        "Do not change the meaning, do not add new information, and preserve the speaker's original style. "
+        "Keep the output in the same language as the source text."
     )
     
     try:
@@ -47,9 +48,10 @@ async def format_transcribed_text(text, settings):
 
 async def summarize_transcription(text, settings):
     system_prompt = (
-        "Твоя задача — выделить самые главные тезисы (summary) из предоставленного текста. "
-        "Сформулируй их в виде краткого и понятного списка (маркированного списка). "
-        "Не используй длинных вступлений, только суть."
+        "Extract the main points from the provided text. "
+        "Return them as a short, clear bullet list. "
+        "Do not add a long introduction. "
+        "Use the same language as the source text."
     )
     
     try:
@@ -69,12 +71,11 @@ async def summarize_transcription(text, settings):
 
 async def summarize_search_results(query, text, settings):
     system_prompt = (
-        "Твоя задача — обработать результаты веб-поиска и дать пользователю "
-        "понятный, связный и краткий ответ на его запрос. "
-        "Важно: не выводи список ссылок и источников, если пользователь строго не попросил об этом "
-        "(например, словами 'дай ссылки' или 'выведи списком')."
+        "Process the web search results and give the user a clear, coherent, concise answer. "
+        "Reply in the same language as the user's query unless the query explicitly asks for another language. "
+        "Do not output a list of links or sources unless the user explicitly asks for them."
     )
-    user_prompt = f"Запрос: {query}\n\nРезультаты поиска:\n{text}"
+    user_prompt = f"Query: {query}\n\nSearch results:\n{text}"
     
     try:
         response_text = await chat_completion(
@@ -92,11 +93,12 @@ async def summarize_search_results(query, text, settings):
 
 
 async def generate_random_question(target_user, settings):
-    name_mention = f"@{target_user['username']}" if target_user.get("username") else target_user.get("first_name", "пользователь")
+    name_mention = f"@{target_user['username']}" if target_user.get("username") else target_user.get("first_name", "user")
     system_prompt = _compose_system_prompt(settings)
     q_prompt = (
-        f"Сгенерируй случайный, забавный, странный или провокационный вопрос "
-        f"для пользователя {name_mention}. Не пиши приветствий, просто задай вопрос."
+        f"Generate a random funny, weird, or provocative question for {name_mention}. "
+        "Do not add greetings. Just ask the question. "
+        "Use the language that best matches the current chat context."
     )
     try:
         response_text = await chat_completion(
@@ -180,7 +182,7 @@ async def process_chat_request(chat_id, prompt, reply_text, settings, web_contex
             retry_messages.append(
                 {
                     "role": "user",
-                    "content": f"{prompt}\n\nОтветь одним-двумя предложениями.",
+                    "content": f"{prompt}\n\nReply in one or two sentences.",
                 }
             )
             response_text = await chat_completion(

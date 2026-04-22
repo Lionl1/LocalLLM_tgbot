@@ -13,8 +13,8 @@ _whisper_model = None
 def _get_whisper_model():
     global _whisper_model
     if _whisper_model is None:
-        logger.info("Загрузка локальной модели Whisper (base)...")
-        _whisper_model = whisper.load_model("base")
+        logger.info("Loading local Whisper model...")
+        _whisper_model = whisper.load_model("small")
     return _whisper_model
 
 def _transcribe_sync(file_path: str) -> str:
@@ -23,7 +23,7 @@ def _transcribe_sync(file_path: str) -> str:
         
         file_size = os.path.getsize(file_path)
         if file_size > 15 * 1024 * 1024:
-            logger.info("Аудио превышает лимит размера (15MB), нарезаем на части...")
+            logger.info("Audio exceeds the 15 MB limit, splitting it into chunks...")
             with tempfile.TemporaryDirectory() as tmpdir:
                 base_name = os.path.join(tmpdir, "chunk_%03d.mp3")
                 cmd = [
@@ -44,9 +44,9 @@ def _transcribe_sync(file_path: str) -> str:
         result = model.transcribe(file_path)
         return result.get("text", "").strip()
     except Exception as exc:
-        logger.error("Ошибка при распознавании аудио через Whisper: %s", exc)
+        logger.error("Whisper transcription failed: %s", exc)
         return ""
 
 async def transcribe_audio(file_path: str) -> str:
-    """Асинхронная обертка для синхронной транскрибации локальным Whisper."""
+    """Async wrapper around synchronous local Whisper transcription."""
     return await asyncio.to_thread(_transcribe_sync, file_path)

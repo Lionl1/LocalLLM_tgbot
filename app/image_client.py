@@ -8,7 +8,7 @@ from app.llm_client import chat_completion
 logger = logging.getLogger(__name__)
 
 class ImageGenerationError(RuntimeError):
-    """Исключение, возникающее при ошибках генерации изображения."""
+    """Raised when image generation fails."""
     pass
 
 
@@ -28,7 +28,7 @@ def _get_pipeline():
             import torch
             from diffusers import DiffusionPipeline, EulerAncestralDiscreteScheduler
 
-            logger.info("Загрузка локальной модели DreamShaper (SD 1.5)...")
+            logger.info("Loading local DreamShaper pipeline...")
             
             device = "cpu"
             dtype = torch.float32
@@ -51,21 +51,21 @@ def _get_pipeline():
             if device == "cuda":
                 try:
                     _pipeline.enable_xformers_memory_efficient_attention()
-                    logger.info("Включено ускорение генерации через xformers")
+                    logger.info("Enabled xformers acceleration for image generation")
                 except Exception:
-                    logger.info("Ускорение xformers недоступно (для CUDA рекомендуется: pip install xformers)")
+                    logger.info("xformers acceleration is unavailable (recommended for CUDA: pip install xformers)")
 
             _pipeline = _pipeline.to(device)
 
-            logger.info(f"Модель DreamShaper успешно загружена на {device}")
+            logger.info("DreamShaper pipeline loaded on %s", device)
         except ImportError as exc:
             raise ImageGenerationError(
-                "Не установлены библиотеки для генерации. "
-                "Выполните: pip install diffusers transformers torch accelerate"
+                "Image generation dependencies are missing. "
+                "Install them with: pip install diffusers transformers torch accelerate"
             ) from exc
         except Exception as exc:
-            logger.error("Ошибка при инициализации пайплайна: %s", exc)
-            raise ImageGenerationError(f"Ошибка загрузки модели: {exc}")
+            logger.error("Failed to initialize the image pipeline: %s", exc)
+            raise ImageGenerationError(f"Model loading failed: {exc}")
 
     return _pipeline
 
@@ -74,7 +74,7 @@ def _generate_sync(prompt: str) -> bytes:
     import torch
     try:
         pipe = _get_pipeline()
-        logger.info("Начинаем локальную генерацию для запроса: %s", prompt)
+        logger.info("Starting local image generation for prompt: %s", prompt)
         
         enhanced_prompt = (
                         f"{prompt}, accurate depiction, matching the prompt, clear subject, "
@@ -100,8 +100,8 @@ def _generate_sync(prompt: str) -> bytes:
         image.save(stream, format="PNG")
         return stream.getvalue()
     except Exception as exc:
-        logger.error("Ошибка при локальной генерации изображения: %s", exc)
-        raise ImageGenerationError(f"Ошибка генерации: {exc}")
+        logger.error("Local image generation failed: %s", exc)
+        raise ImageGenerationError(f"Generation failed: {exc}")
     finally:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -112,8 +112,8 @@ def _generate_sync(prompt: str) -> bytes:
 
 async def generate_image(prompt: str) -> bytes:
     """
-    Генерирует изображение асинхронно через локальную модель DreamShaper.
-    Работает в отдельном потоке (to_thread), чтобы не блокировать бота.
+    Generate an image asynchronously with the local DreamShaper pipeline.
+    Uses a worker thread so the bot event loop is not blocked.
     """
     translation_prompt = (
         "Translate the following text into an English prompt for Stable Diffusion. "
@@ -128,9 +128,9 @@ async def generate_image(prompt: str) -> bytes:
             temperature=0.3
         )
         english_prompt = (english_prompt or prompt).strip()
-        logger.info("Оригинальный промпт: %s | Промпт для SD: %s", prompt, english_prompt)
+        logger.info("Original prompt: %s | Stable Diffusion prompt: %s", prompt, english_prompt)
     except Exception as exc:
-        logger.warning("Не удалось перевести промпт, используем оригинал: %s", exc)
+        logger.warning("Prompt translation failed, using the original text: %s", exc)
         english_prompt = prompt
 
     async with _get_lock():

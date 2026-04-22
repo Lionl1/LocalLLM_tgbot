@@ -1,105 +1,113 @@
 # Telegram LLM Bot
 
-Бот на Python, который отвечает через локальную LLM с OpenAI-совместимым API
-(vLLM или LM Studio) и использует LangChain для пайплайна ответов.
-В группе отвечает, если сообщение начинается со слова-триггера (по умолчанию "Нука", настраивается) или если это ответ
-на сообщение бота.
+Python Telegram bot that talks through a local LLM exposed via an OpenAI-compatible API
+(such as vLLM, LM Studio, or Ollama) and uses LangChain for the response pipeline.
+In group chats it replies when a message starts with the trigger word (default: `Nuka`, configurable)
+or when someone replies to one of the bot's messages.
 
-## Возможности
+The bot is intended for international use:
+- code comments and project documentation are written in English;
+- the bot itself should reply in the language used by the user, or in the language explicitly requested by the user.
 
-- 🤖 **Локальные LLM:** Работает с любыми OpenAI-совместимыми API (vLLM, LM Studio, Ollama).
-- 🎙 **Распознавание голоса:** Автоматически транскрибирует аудиосообщения в текст, аккуратно форматирует их (исправляет опечатки, расставляет знаки препинания, подбирает эмодзи) и может делать краткую выжимку (summary) длинных голосовых.
-- 🗣 **Голосовые ответы (TTS):** Бот умеет озвучивать свои ответы реалистичными нейросетевыми голосами от Silero TTS.
-- 🧠 **Память и умный контекст:** Запоминает историю диалога, учитывает ответы на чужие сообщения. Имеет надежную систему защиты от переполнения контекста (context overflow) — автоматически обрезает старые данные и использует запасные (fallback) промпты при ошибках модели.
-- 🔎 **Умный веб-поиск:** Бот умеет искать информацию в интернете и с помощью LLM формирует понятный, связный и краткий ответ на основе результатов, не перегружая пользователя сырыми ссылками.
-- 🎨 **Генерация изображений:** Локальная генерация картинок через DreamShaper (команда `/image` или триггеры вроде «нарисуй...»).
-- 🎲 **Генерация вопросов:** Умеет генерировать забавные, странные или провокационные вопросы для вовлечения пользователей в беседу (отключается в настройках).
-- ⚙️ **Управление через Mini App:** Удобный графический интерфейс (Web App) прямо внутри Telegram для настройки системного промпта, голоса, длины ответа и триггера индивидуально для каждого чата.
-- 👥 **Группы и личные чаты:** Поддержка работы в группах с гибкой настройкой privacy mode.
-- 🐳 **Готовность к Docker:** Простая упаковка и запуск контейнера.
-- ⚡ **Сверхбыстрая установка:** Использование `uv` для мгновенной загрузки зависимостей и прозрачного управления виртуальным окружением.
+## Features
 
-## Системные требования
+- 🤖 **Local LLMs:** Works with any OpenAI-compatible API (vLLM, LM Studio, Ollama).
+- 🎙 **Voice transcription:** Automatically transcribes audio messages into text, cleans formatting, fixes punctuation, and can generate a short summary for long voice messages.
+- 🗣 **Voice replies (TTS):** Can read its replies aloud with realistic Silero TTS voices.
+- 🧠 **Memory and context management:** Keeps conversation history, understands reply chains, trims old context when needed, and falls back to safer prompt layouts on model errors.
+- 🔎 **Web search:** Can search the web and use the LLM to produce a concise, readable answer from the results instead of dumping raw links.
+- 🎨 **Image generation:** Local image generation through DreamShaper-compatible flow (`/image` or natural language triggers).
+- 🎲 **Random engagement prompts:** Can generate weird, funny, or provocative questions to keep group chats active.
+- ⚙️ **Mini App management:** Telegram Web App interface for per-chat settings such as system prompt, voice, response length, and trigger word.
+- 👥 **Private chats and groups:** Supports both private and group chat workflows, including Telegram privacy mode considerations.
+- 🐳 **Docker-ready:** Simple container build and deployment flow.
+- ⚡ **Fast setup:** Uses `uv` for quick dependency installation and virtual environment management.
 
-Поскольку бот запускает нейросети (Whisper для аудио, DreamShaper для картинок) локально, для стабильной работы требуются соответствующие ресурсы:
+## System Requirements
 
-- **Минимальные (медленная работа на процессоре / CPU):**
-  - ОЗУ (RAM): 8 ГБ
-  - Диск: ~5-10 ГБ свободного места для кэша моделей (SD, Whisper и локальной LLM).
-- **Рекомендуемые (быстрая работа с ускорением GPU):**
-  - ОЗУ (RAM): 16+ ГБ
-  - Видеокарта: NVIDIA с 8+ ГБ VRAM (CUDA) **ИЛИ** Apple Silicon (M1/M2/M3/M4) с 16+ ГБ объединенной памяти (MPS).
+Because the bot runs local models (for example Whisper for audio and Stable Diffusion-compatible image generation), it needs enough host resources for stable operation:
 
-> **Важно:** Если бот запускается через Docker Desktop (Mac/Windows), обязательно зайдите в настройки (Settings -> Resources) и выделите контейнерам **не менее 6 ГБ оперативной памяти**. Иначе операционная система будет "убивать" контейнер (OOM) при попытке сгенерировать картинку.
+- **Minimum (slow CPU-only usage):**
+  - RAM: 8 GB
+  - Disk: about 5-10 GB free for model caches (Stable Diffusion, Whisper, and the local LLM)
+- **Recommended (faster GPU-accelerated usage):**
+  - RAM: 16+ GB
+  - GPU: NVIDIA with 8+ GB VRAM (CUDA) **or** Apple Silicon (M1/M2/M3/M4) with 16+ GB unified memory (MPS)
 
-## Настройка графического интерфейса (Mini App)
-Для удобного управления ботом реализован интерфейс Telegram Web App. Чтобы он работал, вам нужно бесплатно захостить HTML-файл на GitHub Pages:
+> **Important:** If you run the bot through Docker Desktop on macOS or Windows, allocate at least **6 GB of RAM** to containers in `Settings -> Resources`. Otherwise the OS may kill the container with OOM during image generation.
 
-1. Создайте публичный репозиторий на GitHub (например, `bot-settings`).
-2. Скопируйте содержимое файла `webapp_template/index.html` из этого проекта и создайте такой же файл `index.html` в вашем новом репозитории.
-3. Зайдите в **Settings -> Pages** вашего репозитория, выберите ветку `main` (или `master`) и нажмите Save.
-4. Через пару минут GitHub выдаст вам ссылку вида `https://ваше-имя.github.io/bot-settings/`.
-5. Добавьте эту ссылку в файл `.env`:
+## Mini App Setup
+
+The project includes a Telegram Web App interface for bot settings. To use it, host the HTML file on GitHub Pages:
+
+1. Create a public GitHub repository, for example `bot-settings`.
+2. Copy the contents of `app/index.html` from this project into an `index.html` file in that repository.
+3. Open `Settings -> Pages`, choose the `main` (or `master`) branch, and save.
+4. GitHub will publish a URL like `https://your-name.github.io/bot-settings/`.
+5. Add that URL to `.env`:
 
 ```env
-WEB_APP_URL="https://ваше-имя.github.io/bot-settings/"
+WEB_APP_URL="https://your-name.github.io/bot-settings/"
 ```
-*После этого при вызове `/settings` бот будет открывать стильное всплывающее меню настроек.*
 
+After that, calling `/settings` will open the settings Mini App inside Telegram.
 
-## Быстрый старт
+## Quick Start
 
-1) Создай бота в BotFather и возьми токен.
-2) Скопируй `.env.example` в `.env` и заполни ключи (`TELEGRAM_BOT_TOKEN`, при необходимости `OPENAI_API_KEY`, `WEB_SEARCH_API_KEY`).
-3) Проверь настройки в `app/config.py` (модель, URL, лимиты, промпты).
-4) Запусти локальную LLM:
-   - LM Studio: включи Server и используй `http://localhost:1234/v1`.
+1. Create a bot in BotFather and get the token.
+2. Copy `.env.example` to `.env` and fill in the required values (`TELEGRAM_BOT_TOKEN`, and optionally `OPENAI_API_KEY`, `WEB_SEARCH_API_KEY`).
+3. Review `app/config.py` for model, API URL, limits, and prompt settings.
+4. Start your local LLM server:
+   - LM Studio: enable the server and use `http://localhost:1234/v1`
    - vLLM: `python -m vllm.entrypoints.openai.api_server --model <model> --port 8000`
-5) Установи `ffmpeg` (системная зависимость, необходимая для распознавания голосовых сообщений):
+5. Install `ffmpeg` (required for voice transcription):
    - Ubuntu/Debian: `sudo apt update && sudo apt install ffmpeg`
    - macOS: `brew install ffmpeg`
-   - Windows: установи `ffmpeg` и убедись, что он добавлен в системный PATH.
-6) Установи зависимости и запусти:
+   - Windows: install `ffmpeg` and make sure it is available in `PATH`
+6. Install dependencies and run the bot:
 
 ```bash
-# 1. Установи менеджер пакетов uv (если еще не установлен)
+# 1. Install uv if it is not already installed
 curl -LsSf https://astral.sh/uv/install.sh | sh
-# Для Windows: powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+# Windows:
+# powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# 2. uv сам создаст виртуальное окружение, скачает нужный Python и установит все зависимости
+# 2. uv will create the virtual environment, download Python if needed,
+#    and install all dependencies automatically
 uv run python main.py
 ```
 
-## Структура проекта
+## Project Structure
 
-- `webapp_template/` — шаблон для графического интерфейса Telegram Web App.
-- `main.py` — точка входа.
-- `app/bot.py` — сборка и запуск приложения Telegram.
-- `app/handlers.py` — команды и обработчики сообщений.
-- `app/config.py` — конфигурация приложения (ключи берутся из `.env`).
-- `app/llm_service.py` — бизнес-логика работы с LLM.
-- `app/llm_client.py` — LLM клиент и пайплайн запроса.
-- `app/pipeline.py` — сбор сообщений, контекст и постобработка ответа.
-- `app/image_client.py` — клиент генерации изображений.
-- `app/tts_client.py` — клиент генерации голосовых ответов (Text-to-Speech).
-- `app/audio_client.py` — клиент распознавания голосовых сообщений (STT).
-- `app/search_client.py` — клиент веб-поиска.
-- `app/state.py` — память диалога и настройки.
-- `app/text_utils.py` — утилиты разбора текста и лимитов.
-- `app/ui.py` — клавиатуры и форматирование настроек.
+- `main.py` - application entry point
+- `app/bot.py` - Telegram application assembly and startup
+- `app/handlers.py` - commands and message handlers
+- `app/config.py` - application configuration (`.env` values are loaded here)
+- `app/llm_service.py` - high-level LLM workflows
+- `app/llm_client.py` - LLM client and request pipeline
+- `app/pipeline.py` - message assembly, context handling, and response post-processing
+- `app/image_client.py` - image generation client
+- `app/tts_client.py` - text-to-speech client
+- `app/audio_client.py` - speech-to-text client
+- `app/search_client.py` - web search client
+- `app/state.py` - chat memory and settings storage
+- `app/text_utils.py` - text parsing and message splitting helpers
+- `app/ui.py` - keyboard builders and settings formatting
+- `app/index.html` - Telegram Mini App template for settings
 
 ## Docker
 
-Самый удобный способ деплоя — использовать **Docker Compose**.
+The easiest deployment option is **Docker Compose**:
 
 ```bash
 docker compose up -d --build
 ```
 
-Эта команда автоматически соберет образ и запустит бота в фоновом режиме. Кэш нейросетей (Whisper, Stable Diffusion) и настройки чатов будут сохранены в изолированных volumes, чтобы не скачивать и не настраивать всё заново при обновлении.
+This command builds the image and starts the bot in the background. Neural model caches
+(such as Whisper and Stable Diffusion) and chat settings are stored in Docker volumes so they survive restarts and upgrades.
 
 <details>
-<summary>Запуск через обычный Docker CLI (без Compose)</summary>
+<summary>Run with plain Docker CLI</summary>
 
 ```bash
 docker build -t telegram-llm-bot .
@@ -110,54 +118,53 @@ docker run -d --env-file .env \
   --name telegram-llm-bot --restart unless-stopped telegram-llm-bot
 ```
 
-Если локальная LLM запущена на хосте, внутри контейнера `localhost` не виден.
-Для macOS/Windows укажи `OPENAI_BASE_URL` в `.env` как
-`http://host.docker.internal:1234/v1`.
-Для Linux можно использовать `--network=host` при запуске контейнера.
+If the local LLM runs on the host machine, `localhost` inside the container will not reach it.
+
+- On macOS or Windows, set `OPENAI_BASE_URL` in `.env` to `http://host.docker.internal:1234/v1`
+- On Linux, you can use `--network=host`
 
 </details>
 
-## Использование
+## Usage
 
-- Личные сообщения: бот отвечает на любой текст.
-- Группы: напиши слово-триггер (например, `Нука, привет`) или ответь на сообщение бота.
-  Если включен privacy mode в BotFather, бот видит только команды/упоминания,
-  поэтому для триггера без упоминания нужно отключить privacy mode.
-- `/reset` — очистить контекст диалога в этом чате.
-- В группе можно очистить контекст сообщением `<Имя_бота>, сброс` или `<Имя_бота>, очистить`.
-- 🎙 **Голосовые сообщения:** просто отправь боту войс. Он сам переведет его в текст, приведет в читаемый вид и ответит.
-- При переполнении контекста бот удаляет самые старые сообщения и повторяет запрос.
-- Если отвечаешь на сообщение человека, бот добавит этот текст в контекст запроса.
-- `/help` — список команд и кнопки настроек.
-- `/search <текст>` — поиск в интернете (если включен).
-- `/image <описание>` — локальная генерация картинки (DreamShaper).
-- Бот автоматически запускает генерацию, если видит текст вроде «нарисуй картинку с...», даже без команды.
-- Бот автоматически выполняет поиск по тексту вроде «найди в интернете», чтобы показать результаты без команды.
-- Префикс `web:`/`search:`/`поиск:`/`найди в интернете` — выполнить поиск и передать результаты модели.
+- **Private chats:** the bot replies to any text message.
+- **Groups:** mention the trigger word (for example `Nuka, hello`) or reply to one of the bot's messages.
+- If privacy mode is enabled in BotFather, the bot only sees commands and mentions, so a plain trigger word without a mention may not work until privacy mode is disabled.
+- `/reset` clears the chat context.
+- In groups you can also clear context with messages such as `<BotName>, reset`.
+- 🎙 **Voice messages:** send a voice message and the bot will transcribe it, clean it up, and answer.
+- If the context grows too large, the bot automatically drops the oldest messages and retries.
+- If you reply to another person's message, that text is added to the request context.
+- `/help` shows the command list and settings controls.
+- `/search <text>` runs web search if it is enabled.
+- `/image <description>` generates an image locally.
+- The bot can also auto-trigger image generation from natural-language requests like "draw a picture of ...".
+- The bot can auto-trigger web search from natural-language requests like "find this on the internet".
+- Prefixes such as `web:` or `search:` can be used to force web search before the LLM response.
 
-### Настройки в чате
-Напишите боту `/settings` в личные сообщения. Откроется кнопка запуска Mini App, в котором можно настроить бота индивидуально для каждой группы, где вы являетесь администратором. В нём можно изменить системный промпт, голос, триггер-слово, а также отключить генерацию случайных вопросов.
-Настройки хранятся в файле `data/chat_settings.json` и сохраняются между перезапусками.
+### Chat Settings
 
-Также при `/start` и `/settings` бот показывает кнопки для настройки.
-Список команд в меню Telegram обновляется автоматически при запуске бота.
+Send `/settings` to the bot in a private chat. It will open a Mini App where you can configure the bot separately for each group where you are an admin.
 
-## Настройки
+Settings are stored in `data/chat_settings.json` and persist across restarts.
 
-Секреты лежат в `.env`, все остальные параметры — в `app/config.py`.
+The bot also shows settings buttons on `/start` and `/settings`, and refreshes the Telegram command menu automatically at startup.
 
-В `.env` должны быть ключи и параметры подключения:
+## Configuration
 
-- `TELEGRAM_BOT_TOKEN` — токен Telegram-бота.
-- `OPENAI_API_KEY` — ключ LLM API (для локальных серверов можно оставить `not-needed`).
-- `OPENAI_BASE_URL` — URL локального API (`http://localhost:1234/v1` для LM Studio).
-- `OPENAI_MODEL` — имя модели.
-- `WEB_SEARCH_API_KEY` — ключ API (нужен для `serper`).
-- `ALLOWED_USER_IDS` — список `user_id` через запятую. Если пусто, доступ открыт.
-- `IMAGE_GENERATION_ENABLED` — `1`/`0`, включает генерацию картинок внутри бота (по умолчанию `1`).
-- `WEB_APP_URL` — ссылка на ваш форк `webapp_template/index.html` на GitHub Pages.
-- `IMAGE_GENERATION_TIMEOUT` — таймаут запроса в секундах (по умолчанию `60`).
-- `IMAGE_GENERATION_WIDTH`, `IMAGE_GENERATION_HEIGHT` — желаемый размер картинки (по умолчанию `1024`).
+Secrets live in `.env`. Other application defaults are defined in `app/config.py`.
 
-Остальные параметры (лимиты, промпты, поиск, правила контекста)
-настраиваются прямо в `app/config.py`.
+Expected `.env` values:
+
+- `TELEGRAM_BOT_TOKEN` - Telegram bot token
+- `OPENAI_API_KEY` - LLM API key (`not-needed` is fine for many local servers)
+- `OPENAI_BASE_URL` - local LLM API URL (`http://localhost:1234/v1` for LM Studio)
+- `OPENAI_MODEL` - model name
+- `WEB_SEARCH_API_KEY` - search API key (used for `serper`)
+- `ALLOWED_USER_IDS` - comma-separated list of allowed Telegram `user_id` values; empty means open access
+- `IMAGE_GENERATION_ENABLED` - `1` or `0`, enables image generation inside the bot
+- `WEB_APP_URL` - URL of your hosted copy of `app/index.html`
+- `IMAGE_GENERATION_TIMEOUT` - request timeout in seconds (default `60`)
+- `IMAGE_GENERATION_WIDTH`, `IMAGE_GENERATION_HEIGHT` - desired image size (default `1024`)
+
+Other parameters such as limits, prompts, search behavior, and context rules are configured directly in `app/config.py`.

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Настройки бота</title>
-    <!-- Подключаем библиотеку Telegram WebApp -->
+    <title>Bot Settings</title>
+    <!-- Load the Telegram Web App bridge -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
@@ -62,68 +62,68 @@
 <body>
 
     <div class="form-group highlight-box">
-        <label for="chat_selector" style="color: var(--tg-theme-button-color, #3390ec);">Настраиваемый чат:</label>
+        <label for="chat_selector" style="color: var(--tg-theme-button-color, #3390ec);">Chat to configure:</label>
         <select id="chat_selector" style="font-weight: bold; border-color: transparent; background-color: transparent; outline: none; padding: 5px 0;"></select>
     </div>
 
     <div class="form-group">
-        <label for="trigger">Имя бота / Триггер (Определяет пол)</label>
-        <input type="text" id="trigger" placeholder="Например: Алиса">
+        <label for="trigger">Bot name / trigger word</label>
+        <input type="text" id="trigger" placeholder="Example: Alice">
     </div>
 
     <div class="form-group">
-        <label for="mood">Настроение бота</label>
-        <input type="text" id="mood" placeholder="Например: очень саркастичный">
+        <label for="mood">Bot mood</label>
+        <input type="text" id="mood" placeholder="Example: very sarcastic">
     </div>
 
     <div class="form-group">
-        <label for="prompt">Дополнительный системный промпт</label>
-        <textarea id="prompt" placeholder="Любые дополнительные инструкции..."></textarea>
+        <label for="prompt">Additional system prompt</label>
+        <textarea id="prompt" placeholder="Any extra instructions..."></textarea>
     </div>
 
     <div class="form-group">
-        <label for="max_tokens">Лимит ответа (в токенах)</label>
+        <label for="max_tokens">Response limit (tokens)</label>
         <input type="number" id="max_tokens" value="4096">
     </div>
 
     <div class="form-group">
-        <label>Голосовой ответ (Silero TTS)</label>
+        <label>Voice reply (Silero TTS)</label>
         <select id="voice">
-            <option value="false">Выключен</option>
-            <option value="kseniya">Ксения (Женский 1)</option>
-            <option value="xenia">Ксения 2 (Женский 2)</option>
-            <option value="baya">Байя (Женский 3)</option>
-            <option value="aidar">Айдар (Мужской 1)</option>
-            <option value="eugene">Евгений (Мужской 2)</option>
-            <option value="random">Случайный голос</option>
+            <option value="false">Disabled</option>
+            <option value="kseniya">Kseniya (Female 1)</option>
+            <option value="xenia">Xenia (Female 2)</option>
+            <option value="baya">Baya (Female 3)</option>
+            <option value="aidar">Aidar (Male 1)</option>
+            <option value="eugene">Eugene (Male 2)</option>
+            <option value="random">Random voice</option>
         </select>
     </div>
 
     <div class="form-group">
         <label class="checkbox-label">
-            <input type="checkbox" id="syntax"> Включить проверку синтаксиса
+            <input type="checkbox" id="syntax"> Enable syntax correction
         </label>
     </div>
 
     <div class="form-group">
         <label class="checkbox-label">
-            <input type="checkbox" id="random_questions"> Разрешить случайные сообщения
+            <input type="checkbox" id="random_questions"> Allow random prompts
         </label>
     </div>
 
     <div class="form-group">
-        <label for="random_question_prob">Вероятность генерации вопроса (от 0 до 1)</label>
-        <input type="number" id="random_question_prob" step="0.001" min="0" max="1" placeholder="Например: 0.05">
+        <label for="random_question_prob">Random question probability (0 to 1)</label>
+        <input type="number" id="random_question_prob" step="0.001" min="0" max="1" placeholder="Example: 0.05">
     </div>
 
     <div class="form-group">
-        <label for="random_participation_prob">Вероятность участия в диалоге (от 0 до 1)</label>
-        <input type="number" id="random_participation_prob" step="0.001" min="0" max="1" placeholder="Например: 0.1">
+        <label for="random_participation_prob">Random participation probability (0 to 1)</label>
+        <input type="number" id="random_participation_prob" step="0.001" min="0" max="1" placeholder="Example: 0.1">
     </div>
     
     <div class="form-group" style="margin-top: 24px;">
         <button id="reset_btn" style="background-color: var(--tg-theme-destructive-text-color, #ff3b30); color: #fff; width: 100%; border: none; padding: 12px; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer;">
-            🔄 Сбросить настройки чата
+            Reset chat settings
         </button>
     </div>
 
@@ -144,7 +144,7 @@
             if (config.current) chatSelector.value = config.current;
         } else {
             let opt = document.createElement('option');
-            opt.textContent = "Обновите меню бота"; chatSelector.appendChild(opt);
+            opt.textContent = "Refresh the bot menu"; chatSelector.appendChild(opt);
         }
         function loadChatSettings(chatId) {
             const chat = config.chats.find(c => c.id == chatId);
@@ -158,9 +158,9 @@
         }
         if (config.chats.length > 0) loadChatSettings(chatSelector.value);
         chatSelector.addEventListener('change', function() { loadChatSettings(this.value); });
-        tg.MainButton.text = "СОХРАНИТЬ"; tg.MainButton.show();
+        tg.MainButton.text = "SAVE"; tg.MainButton.show();
         document.getElementById('reset_btn').addEventListener('click', function() {
-            tg.showConfirm("Сбросить настройки выбранного чата к значениям по умолчанию?", function(c) {
+            tg.showConfirm("Reset the selected chat settings to defaults?", function(c) {
                 if (c) tg.sendData(JSON.stringify({ action: "reset", chat_id: chatSelector.value }));
             });
         });

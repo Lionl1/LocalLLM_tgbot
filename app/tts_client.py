@@ -11,8 +11,8 @@ def _get_silero_model():
     global _silero_model
     if _silero_model is None:
         import torch
-        logger.info("Загрузка локальной модели Silero TTS (v4_ru)...")
-        # Для TTS мощности CPU более чем достаточно, генерация происходит почти мгновенно
+        logger.info("Loading local Silero TTS model (v4_ru)...")
+        # CPU is sufficient for TTS here; generation is usually near-instant.
         device = torch.device("cpu")
         model, _ = torch.hub.load(
             repo_or_dir="snakers4/silero-models",
@@ -28,7 +28,7 @@ def _get_silero_model():
 def _generate_silero_sync(text: str, voice: str) -> bytes:
     import soundfile as sf
     
-    # У Silero есть техническое ограничение на длину текста за один проход (~1000 символов)
+    # Silero has a practical per-pass input limit of about 1000 characters.
     safe_text = text[:1000] if len(text) > 1000 else text
     
     model = _get_silero_model()
@@ -45,7 +45,7 @@ def _generate_silero_sync(text: str, voice: str) -> bytes:
     audio_np = audio_tensor.cpu().numpy()
     
     fp = BytesIO()
-    # Сохраняем сгенерированный массив в байтовый поток формата WAV напрямую через soundfile
+    # Write the generated audio directly to an in-memory WAV buffer.
     sf.write(fp, audio_np, _silero_sample_rate, format="WAV")
     return fp.getvalue()
 
@@ -56,8 +56,8 @@ async def generate_speech(text: str, voice: str = "kseniya") -> bytes:
     try:
         return await asyncio.to_thread(_generate_silero_sync, text, voice)
     except ImportError as e:
-        logger.error("Ошибка импорта (не хватает библиотеки): %s", e)
+        logger.error("Import failed due to a missing dependency: %s", e)
         return b""
     except Exception as exc:
-        logger.error("Сбой в локальной Silero TTS: %s", exc)
+        logger.error("Local Silero TTS failed: %s", exc)
         return b""

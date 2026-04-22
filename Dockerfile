@@ -5,13 +5,13 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Включаем компиляцию байткода для uv (немного ускоряет старт бота)
+# Enable bytecode compilation for uv to slightly improve startup time.
 ENV UV_COMPILE_BYTECODE=1
 
-# Добавляем инструменты для проверки сети
+# Install basic networking and media dependencies.
 RUN apt-get update && apt-get install -y curl iputils-ping ffmpeg libsndfile1 libgomp1 && rm -rf /var/lib/apt/lists/*
 
-# Копируем бинарники uv из официального образа
+# Copy uv binaries from the official image.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 COPY pyproject.toml uv.lock ./

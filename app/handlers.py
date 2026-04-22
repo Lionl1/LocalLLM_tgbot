@@ -75,19 +75,19 @@ from app.ui import _cancel_keyboard, _format_settings, _settings_keyboard
 logger = logging.getLogger(__name__)
 
 # --- Function Calling Tools Definition ---
-# Эти определения описывают LLM, какие функции доступны и как их вызывать.
+# These definitions tell the LLM which tools are available and how to call them.
 _FUNCTION_CALLING_TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "generate_image",
-            "description": "Генерирует изображение по текстовому описанию. Используй, когда пользователь просит нарисовать, создать картинку, сгенерировать изображение и т.п.",
+            "description": "Generate an image from a text prompt. Use this when the user asks to draw, create, or generate an image.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "prompt": {
                         "type": "string",
-                        "description": "Подробное описание изображения, которое нужно сгенерировать, на русском языке. Например: 'Кот в скафандре летит в космосе, стиль киберпанк, неоновые цвета'",
+                        "description": "Detailed description of the image to generate. Use the same language as the user's request when possible.",
                     }
                 },
                 "required": ["prompt"],
@@ -98,13 +98,13 @@ _FUNCTION_CALLING_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Ищет информацию в интернете по заданному запросу. Используй, когда пользователь просит найти, узнать, поискать что-либо в интернете или если для ответа требуется актуальная информация.",
+            "description": "Search the web for information. Use this when the user asks to find or look up something online, or when fresh information is needed.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Поисковый запрос для интернета, на русском языке. Например: 'новости технологий за сегодня' или 'рецепт борща'",
+                        "description": "Search query for the web. Use the same language as the user's request when possible.",
                     }
                 },
                 "required": ["query"],
@@ -232,7 +232,7 @@ async def _generate_and_send_image(message, prompt):
             raise ImageGenerationError("Получен пустой файл от сервиса.")
             
     except Exception as exc:
-        # Ловим любые ошибки, так как функция теперь работает в фоне и мы не должны ронять таску
+        # Catch any error here because the task runs in the background and must not crash silently.
         logger.exception("Image generation failed: %s", exc)
         error_msg = "Не удалось сгенерировать изображение."
         if "500" in str(exc) or "503" in str(exc):
@@ -265,8 +265,8 @@ async def _generate_and_send_image(message, prompt):
             connect_timeout=60,
         )
     except BadRequest as exc:
-        # Если Telegram не смог обработать картинку, пробуем отправить как файл (документ)
-        # Это поможет диагностировать проблему (например, если пришел текстовый файл с ошибкой)
+        # If Telegram rejects the image payload, retry as a document.
+        # This also helps diagnose issues such as an error payload returned as text.
         logger.warning("reply_photo failed (%s), trying reply_document...", exc)
         stream.seek(0)
         await message.reply_document(
@@ -319,7 +319,7 @@ async def _execute_search_from_tool(update, context, query):
     if not response_text:
         response_text = text
         
-    # Логируем это как действие пользователя для истории
+    # Record the search as a user action in chat history.
     append_history(chat_id, "user", f"Поиск по запросу: {query}")
     append_history(chat_id, "assistant", response_text)
         
@@ -338,7 +338,7 @@ def _truncate_web_text(text, max_tokens):
     cut_at = max(truncated.rfind("\n"), truncated.rfind(" "))
     if cut_at > char_limit // 2:
         truncated = truncated[:cut_at]
-    return truncated.strip() + "\n\n... [результаты обрезаны из-за лимита контекста]"
+    return truncated.strip() + "\n\n... [results truncated due to context limit]"
 
 
 async def start_command(update, context):
@@ -346,7 +346,7 @@ async def start_command(update, context):
         return
     chat_id = update.effective_chat.id
 
-    # Обработка Deep Linking: переход из группы в ЛС для настройки
+    # Handle deep links that jump from a group into private chat settings.
     if context.args and context.args[0].startswith("set_"):
         try:
             target_chat_id = int(context.args[0][4:])
@@ -401,7 +401,7 @@ async def help_command(update, context):
 async def search_command(update, context):
     if not await _ensure_update_allowed(update, context):
         return
-    query = _get_command_text(update.message.text) # Используется для парсинга команды /search
+    query = _get_command_text(update.message.text)  # Parse the /search command payload.
     if not query:
         await update.message.reply_text("Укажи запрос: /search <текст>")
         return
@@ -411,7 +411,7 @@ async def search_command(update, context):
             "Поиск отключен. Включи WEB_SEARCH_ENABLED=1 в .env."
         )
         return
-    # Делегируем выполнение общей логике поиска
+    # Delegate execution to the shared search flow.
     await _execute_search_from_tool(update, context, query)
 
 
@@ -421,13 +421,13 @@ async def image_command(update, context):
     if not IMAGE_GENERATION_ENABLED:
         await _safe_reply_text(update.message, "Генерация изображений отключена.")
         return
-    prompt = _get_command_text(update.message.text) # Используется для парсинга команды /image
+    prompt = _get_command_text(update.message.text)  # Parse the /image command payload.
     if not prompt:
         await _safe_reply_text(
             update.message, "Опиши, что нарисовать: /image <описание>."
         )
         return
-    # Запускаем в фоне, чтобы бот мог сразу отвечать на другие сообщения
+    # Run in the background so the bot can keep handling other messages.
     asyncio.create_task(_generate_and_send_image(update.message, prompt))
 
 
@@ -446,7 +446,7 @@ async def settings_command(update, context):
         return
     chat_id = update.effective_chat.id
     
-    # Telegram запрещает WebApp (sendData) из обычных кнопок в группах.
+    # Telegram blocks WebApp sendData from regular group chat buttons.
     if update.effective_chat.type != ChatType.PRIVATE:
         bot_username = context.bot.username
         url = f"https://t.me/{bot_username}?start=set_{chat_id}"
@@ -757,7 +757,7 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def web_app_data_handler(update, context: ContextTypes.DEFAULT_TYPE):
-    """Обрабатывает данные, присланные из Mini App (Web App)"""
+    """Handle settings data submitted by the Telegram Mini App."""
     if not await _ensure_update_allowed(update, context):
         return
         
@@ -839,18 +839,18 @@ async def post_init(application):
     ] + base_commands
 
     try:
-        # Обычные пользователи в группах увидят только базу
+        # Regular group users only get the base command set.
         await application.bot.set_my_commands(base_commands, scope=BotCommandScopeDefault())
-        # В личных сообщениях будут все команды
+        # Private chats expose the full command set.
         await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeAllPrivateChats())
-        # Администраторы групп увидят все команды
+        # Group administrators also get the full command set.
         await application.bot.set_my_commands(admin_commands, scope=BotCommandScopeAllChatAdministrators())
     except Exception as exc:
         logger.warning("Failed to set bot commands: %s", exc)
 
 
 async def chat_member_handler(update, context: ContextTypes.DEFAULT_TYPE):
-    """Отслеживает добавление бота в группы, чтобы назначить права настройщика."""
+    """Track bot additions to groups so the initial settings owner can be assigned."""
     result = update.my_chat_member
     if not result:
         return
@@ -858,7 +858,7 @@ async def chat_member_handler(update, context: ContextTypes.DEFAULT_TYPE):
     new_status = result.new_chat_member.status
     old_status = result.old_chat_member.status
     
-    # Если бота только что добавили в чат
+    # Detect the moment when the bot has just been added to a chat.
     if new_status in {"member", "administrator"} and old_status not in {"member", "administrator"}:
         chat_id = result.chat.id
         user_id = result.from_user.id
@@ -1046,15 +1046,15 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                             safe_tokens = max(500, CONTEXT_LIMIT_TOKENS - settings.get("max_tokens", 512) - 1000)
                             web_results_text = _truncate_web_text(web_results_text, safe_tokens)
                             web_context = (
-                                "Данные из интернета (это лишь краткие выдержки). "
-                                "Если пользователь ищет стих, песню или известный текст, а здесь только обрывки, "
-                                "ОБЯЗАТЕЛЬНО воспроизведи текст целиком по памяти. Не давай ссылки, если не просили:\n"
+                                "Data from the internet (these are short excerpts only). "
+                                "If the user asks for a poem, song, or other well-known text and the results are fragmentary, "
+                                "reproduce the full text from memory instead of sending links unless links were explicitly requested:\n"
                                 f"{web_results_text}"
                             )
                     except WebSearchError as exc:
                         logger.warning("Web search failed during tool execution: %s", exc)
         except Exception as exc:
-            logger.warning("Ошибка Tool Calling: %s", exc)
+            logger.warning("Tool calling failed: %s", exc)
 
     reset_used, reset_remainder = _split_reset_request(prompt)
     if reset_used:
@@ -1067,10 +1067,13 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.chat.send_action(action=ChatAction.TYPING)
     
-    # Динамически подсказываем LLM её имя (из триггера), чтобы она правильно склоняла глаголы (он/она)
+    # Tell the model its current display name so self-references match the configured identity.
     req_settings = settings.copy()
     bot_identity = trigger_word if trigger_word else context.bot.first_name
-    gender_hint = f"\n[Системное правило: Твое имя — «{bot_identity}». Пиши о себе строго в соответствующем этому имени роде.]"
+    gender_hint = (
+        f"\n[System rule: Your current name is '{bot_identity}'. "
+        "When referring to yourself, use wording that matches this name and the user's language.]"
+    )
     req_settings["extra_prompt"] = f"{req_settings.get('extra_prompt', '')}{gender_hint}".strip()
 
     response_text, parse_mode, error_msg = await process_chat_request(

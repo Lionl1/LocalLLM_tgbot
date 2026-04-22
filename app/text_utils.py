@@ -39,9 +39,9 @@ def _starts_with_prefix(text, prefix):
 
 
 def _format_search_results(results, query):
-    lines = [f"Результаты поиска для запроса: {query}"]
+    lines = [f"Search results for query: {query}"]
     for idx, item in enumerate(results, 1):
-        title = (item.get("title") or "").strip() or "Без названия"
+        title = (item.get("title") or "").strip() or "Untitled"
         url = (item.get("url") or "").strip()
         snippet = (item.get("snippet") or "").strip()
         lines.append(f"{idx}. {title}")
