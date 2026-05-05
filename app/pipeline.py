@@ -4,7 +4,7 @@ import re
 from app.config import CONTEXT_LIMIT_TOKENS, SYSTEM_PROMPT
 from app.llm_client import chat_completion
 from app.state import trim_oldest_history, get_knowledge
-from app.text_utils import _estimate_messages_tokens
+from app.text_utils import _estimate_messages_tokens, _estimate_tokens
 
 logger = logging.getLogger(__name__)
 
