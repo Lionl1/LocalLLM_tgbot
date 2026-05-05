@@ -35,12 +35,15 @@ def _normalize_allowed_user_ids(value):
 ALLOWED_USER_IDS = _normalize_allowed_user_ids(_RAW_ALLOWED_USER_IDS)
 
 CHAT_MEMORY = {}
+CHAT_KNOWLEDGE = {}
 CHAT_SETTINGS = {}
 CHAT_SEEN_USERS = {}
 LAST_RAW_TRANSCRIPTION = {}
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CHAT_SETTINGS_FILE = DATA_DIR / "chat_settings.json"
+CHAT_HISTORY_FILE = DATA_DIR / "chat_history.json"
+CHAT_KNOWLEDGE_FILE = DATA_DIR / "chat_knowledge.json"
 
 DEFAULT_SETTINGS = {
     "chat_title": "",
@@ -70,20 +73,50 @@ DEFAULT_SETTINGS = {
 
 
 async def load_persisted_chat_settings():
-    if not CHAT_SETTINGS_FILE.exists():
-        return
-    try:
-        async with aiofiles.open(CHAT_SETTINGS_FILE, "r", encoding="utf-8") as stream:
-            content = await stream.read()
-            raw = json.loads(content)
-    except (OSError, json.JSONDecodeError):
-        return
-    for raw_chat_id, settings in raw.items():
+    # Load settings
+    if CHAT_SETTINGS_FILE.exists():
         try:
-            chat_id = int(raw_chat_id)
-        except (TypeError, ValueError):
-            continue
-        CHAT_SETTINGS[chat_id] = settings
+            async with aiofiles.open(CHAT_SETTINGS_FILE, "r", encoding="utf-8") as stream:
+                content = await stream.read()
+                raw = json.loads(content)
+                for raw_chat_id, settings in raw.items():
+                    try:
+                        chat_id = int(raw_chat_id)
+                        CHAT_SETTINGS[chat_id] = settings
+                    except (TypeError, ValueError):
+                        continue
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # Load history
+    if CHAT_HISTORY_FILE.exists():
+        try:
+            async with aiofiles.open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as stream:
+                content = await stream.read()
+                raw = json.loads(content)
+                for raw_chat_id, history in raw.items():
+                    try:
+                        chat_id = int(raw_chat_id)
+                        CHAT_MEMORY[chat_id] = history
+                    except (TypeError, ValueError):
+                        continue
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    # Load knowledge
+    if CHAT_KNOWLEDGE_FILE.exists():
+        try:
+            async with aiofiles.open(CHAT_KNOWLEDGE_FILE, "r", encoding="utf-8") as stream:
+                content = await stream.read()
+                raw = json.loads(content)
+                for raw_chat_id, knowledge in raw.items():
+                    try:
+                        chat_id = int(raw_chat_id)
+                        CHAT_KNOWLEDGE[chat_id] = knowledge
+                    except (TypeError, ValueError):
+                        continue
+        except (OSError, json.JSONDecodeError):
+            pass
 
 
 async def _write_chat_settings():
@@ -96,8 +129,34 @@ async def _write_chat_settings():
         return
 
 
+async def _write_chat_history():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {str(chat_id): history for chat_id, history in CHAT_MEMORY.items()}
+    try:
+        async with aiofiles.open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as stream:
+            await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    except OSError:
+        return
+
+
+async def _write_chat_knowledge():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {str(chat_id): knowledge for chat_id, knowledge in CHAT_KNOWLEDGE.items()}
+    try:
+        async with aiofiles.open(CHAT_KNOWLEDGE_FILE, "w", encoding="utf-8") as stream:
+            await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    except OSError:
+        return
+
+
 async def persist_settings():
     await _write_chat_settings()
+
+async def persist_history():
+    await _write_chat_history()
+
+async def persist_knowledge():
+    await _write_chat_knowledge()
 
 def get_settings(chat_id):
     settings = CHAT_SETTINGS.get(chat_id)
@@ -140,6 +199,18 @@ def set_raw_transcription(chat_id, text):
 def get_raw_transcription(chat_id):
     return LAST_RAW_TRANSCRIPTION.get(chat_id, "Нет сохраненной транскрибации.")
 
+def get_knowledge(chat_id):
+    return CHAT_KNOWLEDGE.get(chat_id, "")
+
+
+def set_knowledge(chat_id, knowledge):
+    CHAT_KNOWLEDGE[chat_id] = knowledge
+
+
+def clear_knowledge(chat_id):
+    CHAT_KNOWLEDGE.pop(chat_id, None)
+
+
 def clear_history(chat_id):
     CHAT_MEMORY.pop(chat_id, None)
 
@@ -155,7 +226,9 @@ def get_history(chat_id):
 def append_history(chat_id, role, content):
     history = get_history(chat_id)
     history.append({"role": role, "content": content})
-    max_items = max(HISTORY_LIMIT * 2, 2)
+    # For dynamic memory, we can keep a slightly larger buffer in CHAT_MEMORY
+    # but the KB will hold the long-term context.
+    max_items = max(HISTORY_LIMIT * 2, 6) 
     if len(history) > max_items:
         del history[:-max_items]
 

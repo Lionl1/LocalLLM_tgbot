@@ -37,6 +37,7 @@ from app.llm_service import (
     format_transcribed_text,
     summarize_transcription,
 )
+from app.memory_service import update_knowledge_base
 from app.search_client import WebSearchError, search_web
 from app.image_client import ImageGenerationError, generate_image
 from app.audio_client import transcribe_audio
@@ -54,10 +55,13 @@ from app.state import (
     mark_user_seen,
     reset_settings,
     persist_settings,
+    persist_history,
+    persist_knowledge,
     set_pending,
     set_raw_transcription,
     get_raw_transcription,
     get_all_known_groups,
+    clear_knowledge,
 )
 from app.text_utils import (
     _estimate_tokens,
@@ -401,7 +405,7 @@ async def help_command(update, context):
 async def search_command(update, context):
     if not await _ensure_update_allowed(update, context):
         return
-    query = _get_command_text(update.message.text)  # Parse the /search command payload.
+    query = _get_command_text(update.message.text)
     if not query:
         await update.message.reply_text("Укажи запрос: /search <текст>")
         return
@@ -411,7 +415,6 @@ async def search_command(update, context):
             "Поиск отключен. Включи WEB_SEARCH_ENABLED=1 в .env."
         )
         return
-    # Delegate execution to the shared search flow.
     await _execute_search_from_tool(update, context, query)
 
 
@@ -421,13 +424,12 @@ async def image_command(update, context):
     if not IMAGE_GENERATION_ENABLED:
         await _safe_reply_text(update.message, "Генерация изображений отключена.")
         return
-    prompt = _get_command_text(update.message.text)  # Parse the /image command payload.
+    prompt = _get_command_text(update.message.text)
     if not prompt:
         await _safe_reply_text(
             update.message, "Опиши, что нарисовать: /image <описание>."
         )
         return
-    # Run in the background so the bot can keep handling other messages.
     asyncio.create_task(_generate_and_send_image(update.message, prompt))
 
 
@@ -436,7 +438,17 @@ async def reset_command(update, context):
         return
     chat_id = update.effective_chat.id
     clear_history(chat_id)
+    await persist_history()
     await _safe_reply_text(update.message, "Контекст очищен.")
+
+
+async def reset_kb_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    chat_id = update.effective_chat.id
+    clear_knowledge(chat_id)
+    await persist_knowledge()
+    await _safe_reply_text(update.message, "База знаний (хроническая память) очищена.")
 
 
 async def settings_command(update, context):
@@ -682,16 +694,16 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             target_id = chat_id
             
-        set_config_target(user_id, target_id)
         settings = get_settings(target_id)
         title = settings.get("chat_title") or str(target_id)
         display_name = title if target_id != chat_id else "Личные сообщения"
         
         await query.message.delete()
+        keyboard = await _get_admin_settings_keyboard(context.bot, user_id, chat_id, target_id)
         await context.bot.send_message(
             chat_id=chat_id,
             text=f"✅ Выбран чат: {display_name}\n\n{_format_settings(settings)}",
-            reply_markup=_settings_keyboard(settings)
+            reply_markup=keyboard
         )
         return
     if data == "toggle_voice":
@@ -829,6 +841,7 @@ async def post_init(application):
     
     base_commands = [
         BotCommand("reset", "Сбросить контекст диалога"),
+        BotCommand("resetkb", "Сбросить базу знаний (память)"),
         BotCommand("image", "Сгенерировать картинку"),
         BotCommand("help", "Краткая справка"),
         BotCommand("search", "Поиск в интернете"),
@@ -989,6 +1002,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                         for chunk in chunks:
                             await _safe_send_message(context.bot, chat_id, chunk)
                         append_history(chat_id, "assistant", response_text)
+                        await persist_history()
                 return
                 
             if random.random() >= settings.get("random_participation_prob", RANDOM_PARTICIPATION_PROBABILITY):
@@ -1019,15 +1033,27 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         
     if available_tools and prompt:
         try:
-            tool_messages = [{"role": "user", "content": prompt}]
-            _, tool_calls = await chat_completion(
+            # We use a specialized system prompt for weak models to trigger tools via text if JSON fails.
+            fallback_system = (
+                "You are a routing assistant. If the user wants an image, reply ONLY with [GENERATE_IMAGE: descriptive prompt]. "
+                "If the user wants a web search, reply ONLY with [SEARCH_WEB: search query]. "
+                "Otherwise, reply with 'NORMAL'."
+            )
+            tool_messages = [
+                {"role": "system", "content": fallback_system},
+                {"role": "user", "content": prompt}
+            ]
+            
+            # First attempt with standard tool calling (if model supports it)
+            response_text, tool_calls = await chat_completion(
                 tool_messages,
                 tools=available_tools,
                 tool_choice="auto",
                 temperature=0.1,
-                max_tokens=50
+                max_tokens=100
             )
             
+            # Process standard tool calls
             if tool_calls:
                 tool_call = tool_calls[0]
                 function_name = tool_call.get("name")
@@ -1038,6 +1064,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 elif function_name == "search_web" and WEB_SEARCH_ENABLED:
                     search_query = function_args.get("query", prompt)
+                    # Proceed to actual search logic below...
                     await update.message.chat.send_action(action=ChatAction.TYPING)
                     try:
                         results = await search_web(search_query, limit=WEB_SEARCH_MAX_RESULTS)
@@ -1046,19 +1073,37 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                             safe_tokens = max(500, CONTEXT_LIMIT_TOKENS - settings.get("max_tokens", 512) - 1000)
                             web_results_text = _truncate_web_text(web_results_text, safe_tokens)
                             web_context = (
-                                "Data from the internet (these are short excerpts only). "
-                                "If the user asks for a poem, song, or other well-known text and the results are fragmentary, "
-                                "reproduce the full text from memory instead of sending links unless links were explicitly requested:\n"
+                                "Data from the internet (excerpts):\n"
                                 f"{web_results_text}"
                             )
                     except WebSearchError as exc:
-                        logger.warning("Web search failed during tool execution: %s", exc)
+                        logger.warning("Web search failed: %s", exc)
+
+            # Fallback for weak models: Check text response for [TAGS]
+            elif response_text:
+                if "[GENERATE_IMAGE:" in response_text and IMAGE_GENERATION_ENABLED:
+                    img_prompt = response_text.split("[GENERATE_IMAGE:")[1].split("]")[0].strip()
+                    asyncio.create_task(_generate_and_send_image(update.message, img_prompt or prompt))
+                    return
+                elif "[SEARCH_WEB:" in response_text and WEB_SEARCH_ENABLED:
+                    search_query = response_text.split("[SEARCH_WEB:")[1].split("]")[0].strip()
+                    await update.message.chat.send_action(action=ChatAction.TYPING)
+                    try:
+                        results = await search_web(search_query or prompt, limit=WEB_SEARCH_MAX_RESULTS)
+                        if results:
+                            web_results_text = _format_search_results(results, search_query or prompt)
+                            safe_tokens = max(500, CONTEXT_LIMIT_TOKENS - settings.get("max_tokens", 512) - 1000)
+                            web_results_text = _truncate_web_text(web_results_text, safe_tokens)
+                            web_context = f"Data from the internet:\n{web_results_text}"
+                    except Exception:
+                        pass
         except Exception as exc:
-            logger.warning("Tool calling failed: %s", exc)
+            logger.warning("Tool routing failed: %s", exc)
 
     reset_used, reset_remainder = _split_reset_request(prompt)
     if reset_used:
         clear_history(chat_id)
+        await persist_history()
         if not reset_remainder:
             await _safe_reply_text(update.message, "Контекст очищен.")
             return
@@ -1083,6 +1128,13 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     if error_msg:
         await _safe_reply_text(update.message, error_msg)
         return
+
+    if response_text:
+        await persist_history()
+        asyncio.create_task(update_knowledge_base(chat_id, [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response_text}
+        ]))
 
     chunks = _split_message(response_text)
     if not chunks:

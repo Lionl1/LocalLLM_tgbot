@@ -14,6 +14,7 @@ from app.pipeline import (
 from app.state import (
     append_history,
     get_history,
+    get_knowledge,
     set_history,
     trim_oldest_history,
 )
@@ -117,8 +118,10 @@ async def generate_random_question(target_user, settings):
 
 async def process_chat_request(chat_id, prompt, reply_text, settings, web_context="", web_results_text=""):
     history = list(get_history(chat_id))
+    knowledge = get_knowledge(chat_id)
+    
     history, trimmed, messages = await _trim_history_to_fit(
-        history, prompt, reply_text, settings, web_context
+        history, prompt, reply_text, settings, web_context, knowledge
     )
     if trimmed:
         set_history(chat_id, history)
@@ -143,7 +146,7 @@ async def process_chat_request(chat_id, prompt, reply_text, settings, web_contex
                 history = trim_oldest_history(history)
                 set_history(chat_id, history)
                 messages = _build_messages(
-                    history, prompt, reply_text, settings, web_context
+                    history, prompt, reply_text, settings, web_context, knowledge
                 )
                 attempts += 1
                 if history:
@@ -153,7 +156,7 @@ async def process_chat_request(chat_id, prompt, reply_text, settings, web_contex
                 logger.warning("Chat template error, retrying with minimal prompt for chat %s", chat_id)
                 try:
                     response_text = await chat_completion(
-                        _build_flat_fallback_messages(history, prompt, reply_text, settings, web_context),
+                        _build_flat_fallback_messages(history, prompt, reply_text, settings, web_context, knowledge),
                         max_tokens=settings["max_tokens"],
                         temperature=settings["temperature"],
                     )
@@ -175,7 +178,7 @@ async def process_chat_request(chat_id, prompt, reply_text, settings, web_contex
     if not response_text:
         logger.info("Empty LLM response, retrying without history for chat %s", chat_id)
         try:
-            retry_system_prompt = _compose_system_prompt(settings)
+            retry_system_prompt = _compose_system_prompt(settings, knowledge)
             if web_context:
                 retry_system_prompt = f"{retry_system_prompt}\n\n{web_context}"
             retry_messages = [{"role": "system", "content": retry_system_prompt}]

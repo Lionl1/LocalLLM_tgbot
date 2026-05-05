@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Bot Settings</title>
-    <!-- Load the Telegram Web App bridge -->
+    <!-- Подключаем библиотеку Telegram WebApp -->
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
@@ -62,63 +62,63 @@
 <body>
 
     <div class="form-group highlight-box">
-        <label for="chat_selector" style="color: var(--tg-theme-button-color, #3390ec);">Chat to configure:</label>
+        <label for="chat_selector" id="l_chat_selector" style="color: var(--tg-theme-button-color, #3390ec);">Chat to configure:</label>
         <select id="chat_selector" style="font-weight: bold; border-color: transparent; background-color: transparent; outline: none; padding: 5px 0;"></select>
     </div>
 
     <div class="form-group">
-        <label for="trigger">Bot name / trigger word</label>
-        <input type="text" id="trigger" placeholder="Example: Alice">
+        <label for="trigger" id="l_trigger">Bot name / trigger word</label>
+        <input type="text" id="trigger" placeholder="">
     </div>
 
     <div class="form-group">
-        <label for="mood">Bot mood</label>
-        <input type="text" id="mood" placeholder="Example: very sarcastic">
+        <label for="mood" id="l_mood">Bot mood</label>
+        <input type="text" id="mood" placeholder="">
     </div>
 
     <div class="form-group">
-        <label for="prompt">Additional system prompt</label>
-        <textarea id="prompt" placeholder="Any extra instructions..."></textarea>
+        <label for="prompt" id="l_prompt">Additional system prompt</label>
+        <textarea id="prompt" placeholder=""></textarea>
     </div>
 
     <div class="form-group">
-        <label for="max_tokens">Response limit (tokens)</label>
+        <label for="max_tokens" id="l_max_tokens">Response limit (tokens)</label>
         <input type="number" id="max_tokens" value="4096">
     </div>
 
     <div class="form-group">
-        <label>Voice reply (Silero TTS)</label>
+        <label id="l_voice">Voice reply (Silero TTS)</label>
         <select id="voice">
-            <option value="false">Disabled</option>
-            <option value="kseniya">Kseniya (Female 1)</option>
-            <option value="xenia">Xenia (Female 2)</option>
-            <option value="baya">Baya (Female 3)</option>
-            <option value="aidar">Aidar (Male 1)</option>
-            <option value="eugene">Eugene (Male 2)</option>
-            <option value="random">Random voice</option>
+            <option value="false" id="v_off">Disabled</option>
+            <option value="kseniya" id="v_kseniya">Kseniya (Female 1)</option>
+            <option value="xenia" id="v_xenia">Xenia (Female 2)</option>
+            <option value="baya" id="v_baya">Baya (Female 3)</option>
+            <option value="aidar" id="v_aidar">Aidar (Male 1)</option>
+            <option value="eugene" id="v_eugene">Eugene (Male 2)</option>
+            <option value="random" id="v_random">Random voice</option>
         </select>
     </div>
 
     <div class="form-group">
         <label class="checkbox-label">
-            <input type="checkbox" id="syntax"> Enable syntax correction
+            <input type="checkbox" id="syntax"> <span id="l_syntax">Enable syntax correction</span>
         </label>
     </div>
 
     <div class="form-group">
         <label class="checkbox-label">
-            <input type="checkbox" id="random_questions"> Allow random prompts
+            <input type="checkbox" id="random_questions"> <span id="l_random_questions">Allow random prompts</span>
         </label>
     </div>
 
     <div class="form-group">
-        <label for="random_question_prob">Random question probability (0 to 1)</label>
-        <input type="number" id="random_question_prob" step="0.001" min="0" max="1" placeholder="Example: 0.05">
+        <label for="random_question_prob" id="l_rqp">Random question probability (0 to 1)</label>
+        <input type="number" id="random_question_prob" step="0.001" min="0" max="1">
     </div>
 
     <div class="form-group">
-        <label for="random_participation_prob">Random participation probability (0 to 1)</label>
-        <input type="number" id="random_participation_prob" step="0.001" min="0" max="1" placeholder="Example: 0.1">
+        <label for="random_participation_prob" id="l_rpp">Random participation probability (0 to 1)</label>
+        <input type="number" id="random_participation_prob" step="0.001" min="0" max="1">
     </div>
     
     <div class="form-group" style="margin-top: 24px;">
@@ -130,6 +130,81 @@
     <script>
         const tg = window.Telegram.WebApp;
         tg.expand();
+
+        const i18n = {
+            ru: {
+                l_chat_selector: "Настраиваемый чат:",
+                l_trigger: "Имя бота / Триггер (Определяет пол)",
+                l_mood: "Настроение бота",
+                l_prompt: "Дополнительный системный промпт",
+                l_max_tokens: "Лимит ответа (в токенах)",
+                l_voice: "Голосовой ответ (Silero TTS)",
+                v_off: "Выключен",
+                v_kseniya: "Ксения (Женский 1)",
+                v_xenia: "Ксения 2 (Женский 2)",
+                v_baya: "Байя (Женский 3)",
+                v_aidar: "Айдар (Мужской 1)",
+                v_eugene: "Евгений (Мужской 2)",
+                v_random: "Случайный голос",
+                l_syntax: "Включить проверку синтаксиса",
+                l_random_questions: "Разрешить случайные сообщения",
+                l_rqp: "Вероятность генерации вопроса (от 0 до 1)",
+                l_rpp: "Вероятность участия в диалоге (от 0 до 1)",
+                reset_btn: "🔄 Сбросить настройки чата",
+                save_btn: "СОХРАНИТЬ",
+                confirm_reset: "Сбросить настройки выбранного чата к значениям по умолчанию?",
+                ph_trigger: "Например: Алиса",
+                ph_mood: "Например: очень саркастичный",
+                ph_prompt: "Любые дополнительные инструкции...",
+                refresh_msg: "Обновите меню бота"
+            },
+            en: {
+                l_chat_selector: "Chat to configure:",
+                l_trigger: "Bot name / trigger word (Defines gender)",
+                l_mood: "Bot mood",
+                l_prompt: "Additional system prompt",
+                l_max_tokens: "Response limit (tokens)",
+                l_voice: "Voice reply (Silero TTS)",
+                v_off: "Disabled",
+                v_kseniya: "Kseniya (Female 1)",
+                v_xenia: "Xenia (Female 2)",
+                v_baya: "Baya (Female 3)",
+                v_aidar: "Aidar (Male 1)",
+                v_eugene: "Eugene (Male 2)",
+                v_random: "Random voice",
+                l_syntax: "Enable syntax correction",
+                l_random_questions: "Allow random prompts",
+                l_rqp: "Random question probability (0 to 1)",
+                l_rpp: "Random participation probability (0 to 1)",
+                reset_btn: "🔄 Reset chat settings",
+                save_btn: "SAVE",
+                confirm_reset: "Reset selected chat settings to defaults?",
+                ph_trigger: "Example: Alice",
+                ph_mood: "Example: very sarcastic",
+                ph_prompt: "Any extra instructions...",
+                refresh_msg: "Refresh the bot menu"
+            }
+        };
+
+        const userLang = (tg.initDataUnsafe && tg.initDataUnsafe.user && tg.initDataUnsafe.user.language_code === 'ru') ? 'ru' : 'en';
+        const t = i18n[userLang];
+
+        // Apply translations
+        for (let id in t) {
+            const el = document.getElementById(id);
+            if (el) {
+                if (id.startsWith('ph_')) {
+                    // It's a placeholder, find the input
+                    const inputId = id.replace('ph_', '');
+                    const inputEl = document.getElementById(inputId);
+                    if (inputEl) inputEl.placeholder = t[id];
+                } else {
+                    el.textContent = t[id];
+                }
+            }
+        }
+        tg.MainButton.text = t.save_btn;
+
         const urlParams = new URLSearchParams(window.location.search);
         let config = { current: null, chats: [] };
         if (urlParams.has('config')) {
@@ -144,37 +219,48 @@
             if (config.current) chatSelector.value = config.current;
         } else {
             let opt = document.createElement('option');
-            opt.textContent = "Refresh the bot menu"; chatSelector.appendChild(opt);
+            opt.textContent = t.refresh_msg; chatSelector.appendChild(opt);
         }
+
         function loadChatSettings(chatId) {
             const chat = config.chats.find(c => c.id == chatId);
             if (!chat) return;
-            document.getElementById('trigger').value = chat.tw || "Нука";
+            document.getElementById('trigger').value = chat.tw || (userLang === 'ru' ? "Нука" : "Nuka");
             document.getElementById('mood').value = chat.md || "";
             document.getElementById('prompt').value = chat.ep || "";
             document.getElementById('max_tokens').value = chat.mt || 4096;
             document.getElementById('voice').value = chat.vr || "false";
             document.getElementById('syntax').checked = chat.cs === true;
+            document.getElementById('random_questions').checked = chat.rq !== false;
+            document.getElementById('random_question_prob').value = (chat.rqp !== undefined) ? chat.rqp : 0.05;
+            document.getElementById('random_participation_prob').value = (chat.rpp !== undefined) ? chat.rpp : 0.1;
         }
+
         if (config.chats.length > 0) loadChatSettings(chatSelector.value);
         chatSelector.addEventListener('change', function() { loadChatSettings(this.value); });
-        tg.MainButton.text = "SAVE"; tg.MainButton.show();
+        
+        tg.MainButton.show();
+        
         document.getElementById('reset_btn').addEventListener('click', function() {
-            tg.showConfirm("Reset the selected chat settings to defaults?", function(c) {
+            tg.showConfirm(t.confirm_reset, function(c) {
                 if (c) tg.sendData(JSON.stringify({ action: "reset", chat_id: chatSelector.value }));
             });
         });
+
         tg.onEvent('mainButtonClicked', function() {
             let voiceVal = document.getElementById("voice").value;
             if (voiceVal === "false") voiceVal = false;
             tg.sendData(JSON.stringify({
                 chat_id: chatSelector.value,
-                trigger_word: document.getElementById("trigger").value || "Нука",
+                trigger_word: document.getElementById("trigger").value || (userLang === 'ru' ? "Нука" : "Nuka"),
                 mood: document.getElementById("mood").value,
                 extra_prompt: document.getElementById("prompt").value,
                 max_tokens: document.getElementById("max_tokens").value || 4096,
                 voice_response: voiceVal,
-                check_syntax: document.getElementById("syntax").checked
+                check_syntax: document.getElementById("syntax").checked,
+                random_questions: document.getElementById('random_questions').checked,
+                random_question_prob: document.getElementById('random_question_prob').value,
+                random_participation_prob: document.getElementById('random_participation_prob').value
             }));
         });
     </script>

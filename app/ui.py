@@ -7,46 +7,46 @@ from telegram import (
     ReplyKeyboardMarkup,
     WebAppInfo,
 )
-from app.config import WEB_APP_URL
+from app.config import WEB_APP_URL, RANDOM_QUESTION_PROBABILITY, RANDOM_PARTICIPATION_PROBABILITY
 
 
 def _format_settings(settings):
     voice_state = settings.get('voice_response')
     voice_labels = {
-        "female": "ON (Kseniya)",
-        "male": "ON (Aidar)",
-        "kseniya": "ON (Kseniya)",
-        "xenia": "ON (Xenia)",
-        "baya": "ON (Baya)",
-        "aidar": "ON (Aidar)",
-        "eugene": "ON (Eugene)",
-        "random": "ON (Random)"
+        "female": "ВКЛ (Ксения)",
+        "male": "ВКЛ (Айдар)",
+        "kseniya": "ВКЛ (Ксения)",
+        "xenia": "ВКЛ (Ксения 2)",
+        "baya": "ВКЛ (Байя)",
+        "aidar": "ВКЛ (Айдар)",
+        "eugene": "ВКЛ (Евгений)",
+        "random": "ВКЛ (Случайный)"
     }
     if voice_state in voice_labels:
         voice_label = voice_labels[voice_state]
     elif voice_state:
-        voice_label = "ON"
+        voice_label = "ВКЛ"
     else:
-        voice_label = "OFF"
+        voice_label = "ВЫКЛ"
 
     lines = [
-        "Current settings:",
-        f"Trigger: {settings['trigger_word']}",
-        f"Mood: {settings['mood'] or 'not set'}",
-        f"Extra prompt: {settings['extra_prompt'] or 'not set'}",
-        f"Response format: {settings['response_format'] or 'not set'}",
+        "Текущие настройки:",
+        f"Триггер: {settings['trigger_word']}",
+        f"Настроение: {settings['mood'] or 'не установлено'}",
+        f"Доп. промпт: {settings['extra_prompt'] or 'не установлено'}",
+        f"Формат ответа: {settings['response_format'] or 'не установлено'}",
         (
-            "Character limit: "
+            "Лимит символов: "
             f"{settings['max_response_chars']}"
             if settings["max_response_chars"] > 0
-            else "Character limit: not set"
+            else "Лимит символов: не установлен"
         ),
-        f"Max reply (tokens): {settings['max_tokens']}",
-        f"Syntax correction: {'ON' if settings.get('check_syntax') else 'OFF'}",
-        f"Voice reply: {voice_label}",
-        f"Random questions: {'ON' if settings.get('random_questions', True) else 'OFF'}",
-        f"Question probability: {settings.get('random_question_prob', 0)}",
-        f"Participation probability: {settings.get('random_participation_prob', 0)}",
+        f"Лимит токенов: {settings['max_tokens']}",
+        f"Проверка синтаксиса: {'ВКЛ' if settings.get('check_syntax') else 'ВЫКЛ'}",
+        f"Голосовой ответ: {voice_label}",
+        f"Случайные сообщения: {'ВКЛ' if settings.get('random_questions', True) else 'ВЫКЛ'}",
+        f"Вер. вопроса: {settings.get('random_question_prob', RANDOM_QUESTION_PROBABILITY)}",
+        f"Вер. участия: {settings.get('random_participation_prob', RANDOM_PARTICIPATION_PROBABILITY)}",
     ]
     return "\n".join(lines)
 
@@ -71,8 +71,8 @@ def _settings_keyboard(manageable_chats=None, current_chat_id=None):
                 "vr": voice_val if voice_val else "false",
                 "cs": True if s.get("check_syntax") else False,
                 "rq": True if s.get("random_questions", True) else False,
-                "rqp": s.get("random_question_prob", 0.000000000000001),
-                "rpp": s.get("random_participation_prob", 0.000000000000001)
+                "rqp": s.get("random_question_prob", RANDOM_QUESTION_PROBABILITY),
+                "rpp": s.get("random_participation_prob", RANDOM_PARTICIPATION_PROBABILITY)
             })
             
         json_str = json.dumps(payload)
@@ -80,12 +80,12 @@ def _settings_keyboard(manageable_chats=None, current_chat_id=None):
         web_app_url = f"{web_app_url}?{query_string}"
         
     return ReplyKeyboardMarkup(
-        [[KeyboardButton("⚙️ Open Settings", web_app=WebAppInfo(url=web_app_url))]],
+        [[KeyboardButton("⚙️ Открыть настройки", web_app=WebAppInfo(url=web_app_url))]],
         resize_keyboard=True
     )
 
 
 def _cancel_keyboard():
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Cancel", callback_data="cancel")]]
+        [[InlineKeyboardButton("Отмена", callback_data="cancel")]]
     )

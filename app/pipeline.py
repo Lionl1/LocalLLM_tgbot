@@ -3,7 +3,7 @@ import re
 
 from app.config import CONTEXT_LIMIT_TOKENS, SYSTEM_PROMPT
 from app.llm_client import chat_completion
-from app.state import trim_oldest_history
+from app.state import trim_oldest_history, get_knowledge
 from app.text_utils import _estimate_messages_tokens
 
 logger = logging.getLogger(__name__)
@@ -18,8 +18,15 @@ def _priority_instruction(settings):
         )
     return ""
 
-def _compose_system_prompt(settings):
+def _compose_system_prompt(settings, knowledge=""):
     parts = [settings["system_prompt"]]
+    if knowledge:
+        # Prevent KB from consuming more than 25% of the total context window
+        kb_limit = CONTEXT_LIMIT_TOKENS // 4
+        if _estimate_tokens(knowledge) > kb_limit:
+            knowledge = _trim_to_char_limit(knowledge, kb_limit * 4) # approx tokens to chars
+            knowledge += "\n... [knowledge base truncated]"
+        parts.append(f"CHRONIC MEMORY (Knowledge Base):\n{knowledge}")
     if settings["context_policy"]:
         parts.append(f"Context rules: {settings['context_policy']}")
     priority = _priority_instruction(settings)
@@ -47,8 +54,8 @@ def _compose_system_prompt(settings):
         )
     return "\n\n".join(parts)
 
-def _build_messages(history, prompt, reply_text, settings, web_context=""):
-    system_prompt = _compose_system_prompt(settings)
+def _build_messages(history, prompt, reply_text, settings, web_context="", knowledge=""):
+    system_prompt = _compose_system_prompt(settings, knowledge)
     if web_context:
         system_prompt = f"{system_prompt}\n\n{web_context}"
     messages = [{"role": "system", "content": system_prompt}]
@@ -64,9 +71,9 @@ def _build_messages(history, prompt, reply_text, settings, web_context=""):
     return messages
 
 def _build_flat_fallback_messages(
-    history, prompt, reply_text, settings, web_context=""
+    history, prompt, reply_text, settings, web_context="", knowledge=""
 ):
-    system_prompt = settings.get("system_prompt") or SYSTEM_PROMPT
+    system_prompt = _compose_system_prompt(settings, knowledge)
     priority = _priority_instruction(settings)
     context_parts = []
     if priority:
@@ -108,19 +115,20 @@ def _trim_to_char_limit(text, max_chars):
 
 
 def _looks_like_markdown(text):
-    pattern = r"(```|`[^`]+`|\*\*.+?\*\*|__.+?__|\[(.+?)\]\((.+?)\)|^#{1,6}\s)"
+    # Detect bold, code, links, headers, lists, and italics
+    pattern = r"(```|`[^`]+`|\*\*.+?\*\*|__.+?__|\[.+?\]\(.+?\)|^#{1,6}\s|^[\*\-]\s|^\d+\.\s|(\s|^)\*.+?\*(\s|$)|(\s|^)_.+?_(\s|$))"
     return bool(re.search(pattern, text or "", flags=re.M))
 
 
 def _strip_markdown_syntax(text):
     if not text:
         return text
+    # Remove code blocks
     text = re.sub(r"```(?:[^\n]*\n)?(.*?)```", lambda m: m.group(1).strip(), text, flags=re.S)
-    text = re.sub(r"`([^`]+)`", r"\1", text)
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    text = re.sub(r"__(.+?)__", r"\1", text)
-    text = re.sub(r"\*(.+?)\*", r"\1", text)
-    text = re.sub(r"_(.+?)_", r"\1", text)
+    # Remove other markdown tags
+    text = re.sub(r"(`|\*\*|__|\*|_) ", r"\1", text) # fix spaces
+    text = re.sub(r"[`\*_]{1,3}", "", text)
+    text = re.sub(r"\[(.+?)\]\(.+?\)", r"\1", text)
     text = re.sub(r"(?m)^#{1,6}\s+", "", text)
     text = re.sub(r"(?m)^>\s?", "", text)
     return text
@@ -130,9 +138,11 @@ def _fix_markdown_formatting(text):
     if not text:
         return text
     
+    # 1. Balance triple backticks
     if text.count("```") % 2 != 0:
         text += "\n```"
 
+    # 2. Basic table and block logic
     lines = text.split('\n')
     in_code_block = False
     in_table = False
@@ -163,7 +173,28 @@ def _fix_markdown_formatting(text):
     
     if in_table:
         new_lines.append('```')
-    return '\n'.join(new_lines)
+    
+    result = '\n'.join(new_lines)
+    
+    # 3. Escape lone special characters that often break Telegram Markdown parser
+    # Legacy Markdown mode in TG is sensitive to lone characters.
+    # We only do this if NOT inside a code block (already handled by block logic).
+    if not in_code_block:
+        # Balance bold **
+        if result.count("**") % 2 != 0:
+            result = result.replace("**", "*", 1) # Reduce first lone ** to *
+            if result.count("**") % 2 != 0:
+                result += "**" # append if still unbalanced
+        
+        # Balance simple * (italic) - but be careful as it's used in lists
+        # This is a naive balancer.
+        stars = result.count("*")
+        if stars % 2 != 0:
+            # Check if it's a list star
+            if not re.search(r"(?m)^\*\s", result):
+                result += "*"
+    
+    return result
 
 async def _format_response_with_llm(prompt, response_text, settings):
     if not settings.get("response_format") or not settings.get("format_with_llm"):
@@ -289,9 +320,9 @@ async def _generate_summary(text_to_summarize):
         logger.warning("Failed to generate summary: %s", exc)
         return None
 
-async def _trim_history_to_fit(history, prompt, reply_text, settings, web_context=""):
+async def _trim_history_to_fit(history, prompt, reply_text, settings, web_context="", knowledge=""):
     trimmed = False
-    messages = _build_messages(history, prompt, reply_text, settings, web_context)
+    messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge)
     
     if not _context_limit_exceeded(messages, settings["max_tokens"]):
         return history, trimmed, messages
@@ -328,12 +359,12 @@ async def _trim_history_to_fit(history, prompt, reply_text, settings, web_contex
             }
             history = [summary_message] + recent_history
             trimmed = True
-            messages = _build_messages(history, prompt, reply_text, settings, web_context)
+            messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge)
 
     while history and _context_limit_exceeded(messages, settings["max_tokens"]):
         history = trim_oldest_history(history)
         trimmed = True
-        messages = _build_messages(history, prompt, reply_text, settings, web_context)
+        messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge)
         
     return history, trimmed, messages
 

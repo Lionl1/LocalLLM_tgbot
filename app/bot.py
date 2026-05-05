@@ -10,6 +10,7 @@ from app.handlers import (
     image_command,
     post_init,
     reset_command,
+    reset_kb_command,
     reset_settings_command,
     search_command,
     set_max_command,
@@ -38,6 +39,7 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("reset", reset_command))
+    application.add_handler(CommandHandler("resetkb", reset_kb_command))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("image", image_command))
     application.add_handler(CommandHandler("setmood", set_mood_command))
