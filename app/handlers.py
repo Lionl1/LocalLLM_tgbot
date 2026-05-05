@@ -4,6 +4,7 @@ import os
 import tempfile
 import json
 import asyncio
+import base64
 from io import BytesIO
 
 from telegram import (
@@ -890,12 +891,29 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         return
         
     audio_obj = update.message.voice or update.message.audio or update.message.video_note
+    photo_obj = update.message.photo[-1] if update.message.photo else None
     text = update.message.text or update.message.caption or ""
 
-    if not text and not audio_obj:
+    if not text and not audio_obj and not photo_obj:
         return
 
-    if audio_obj and update.message.audio:
+    image_data = None
+    if photo_obj:
+        if not await _ensure_update_allowed(update, context):
+            return
+        await update.message.chat.send_action(action=ChatAction.UPLOAD_PHOTO)
+        try:
+            photo_file = await context.bot.get_file(photo_obj.file_id)
+            # Use BytesIO to avoid saving to disk
+            buf = BytesIO()
+            await photo_file.download_to_memory(buf)
+            image_data = base64.b64encode(buf.getvalue()).decode("utf-8")
+        except Exception as exc:
+            logger.exception("Photo processing failed: %s", exc)
+            await _safe_reply_text(update.message, "Ошибка обработки изображения.")
+            return
+
+    if audio_obj:
         if not detect_transcription_request(text):
             audio_obj = None
 
@@ -1122,7 +1140,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     req_settings["extra_prompt"] = f"{req_settings.get('extra_prompt', '')}{gender_hint}".strip()
 
     response_text, parse_mode, error_msg = await process_chat_request(
-        chat_id, prompt, reply_text, req_settings, web_context, web_results_text
+        chat_id, prompt, reply_text, req_settings, web_context, web_results_text, image_data=image_data
     )
     
     if error_msg:

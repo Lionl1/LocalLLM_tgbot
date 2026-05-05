@@ -28,6 +28,7 @@ def _to_lc_messages(messages):
     for message in messages or []:
         role = message.get("role", "user")
         content = message.get("content", "")
+        # content can be a string or a list of dicts for multimodal
         if role == "system":
             converted.append(SystemMessage(content=content))
         elif role == "assistant":

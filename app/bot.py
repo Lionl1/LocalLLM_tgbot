@@ -57,7 +57,7 @@ def main():
         MessageHandler(filters.StatusUpdate.WEB_APP_DATA, web_app_data_handler)
     )
     application.add_handler(
-        MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE) & ~filters.COMMAND, handle_message)
+        MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO | filters.VIDEO_NOTE | filters.PHOTO) & ~filters.COMMAND, handle_message)
     )
     application.add_handler(ChatMemberHandler(chat_member_handler, ChatMemberHandler.MY_CHAT_MEMBER))
     application.run_polling(allowed_updates=["message", "callback_query", "my_chat_member"])

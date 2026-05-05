@@ -54,20 +54,29 @@ def _compose_system_prompt(settings, knowledge=""):
         )
     return "\n\n".join(parts)
 
-def _build_messages(history, prompt, reply_text, settings, web_context="", knowledge=""):
+def _build_messages(history, prompt, reply_text, settings, web_context="", knowledge="", image_data=None):
     system_prompt = _compose_system_prompt(settings, knowledge)
     if web_context:
         system_prompt = f"{system_prompt}\n\n{web_context}"
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(history)
+    
+    user_content = []
     if reply_text:
-        messages.append(
-            {
-                "role": "user",
-                "content": f"Message being replied to:\n{reply_text}",
-            }
-        )
-    messages.append({"role": "user", "content": prompt})
+        user_content.append({"type": "text", "text": f"Message being replied to:\n{reply_text}"})
+    
+    if image_data:
+        # Multimodal content structure
+        user_content.append({"type": "text", "text": prompt})
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
+        })
+    else:
+        # Standard text content
+        user_content = prompt if not reply_text else [{"type": "text", "text": prompt}] + user_content
+
+    messages.append({"role": "user", "content": user_content})
     return messages
 
 def _build_flat_fallback_messages(
@@ -320,9 +329,9 @@ async def _generate_summary(text_to_summarize):
         logger.warning("Failed to generate summary: %s", exc)
         return None
 
-async def _trim_history_to_fit(history, prompt, reply_text, settings, web_context="", knowledge=""):
+async def _trim_history_to_fit(history, prompt, reply_text, settings, web_context="", knowledge="", image_data=None):
     trimmed = False
-    messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge)
+    messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge, image_data=image_data)
     
     if not _context_limit_exceeded(messages, settings["max_tokens"]):
         return history, trimmed, messages
@@ -359,12 +368,12 @@ async def _trim_history_to_fit(history, prompt, reply_text, settings, web_contex
             }
             history = [summary_message] + recent_history
             trimmed = True
-            messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge)
+            messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge, image_data=image_data)
 
     while history and _context_limit_exceeded(messages, settings["max_tokens"]):
         history = trim_oldest_history(history)
         trimmed = True
-        messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge)
+        messages = _build_messages(history, prompt, reply_text, settings, web_context, knowledge, image_data=image_data)
         
     return history, trimmed, messages
 

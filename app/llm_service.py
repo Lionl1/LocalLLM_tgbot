@@ -116,12 +116,12 @@ async def generate_random_question(target_user, settings):
         return ""
 
 
-async def process_chat_request(chat_id, prompt, reply_text, settings, web_context="", web_results_text=""):
+async def process_chat_request(chat_id, prompt, reply_text, settings, web_context="", web_results_text="", image_data=None):
     history = list(get_history(chat_id))
     knowledge = get_knowledge(chat_id)
     
     history, trimmed, messages = await _trim_history_to_fit(
-        history, prompt, reply_text, settings, web_context, knowledge
+        history, prompt, reply_text, settings, web_context, knowledge, image_data=image_data
     )
     if trimmed:
         set_history(chat_id, history)
@@ -141,6 +141,15 @@ async def process_chat_request(chat_id, prompt, reply_text, settings, web_contex
             )
             break
         except LLMRequestError as exc:
+            # Fallback for text-only models: If we have an image and it failed with a 400 or specific error
+            if image_data and (exc.status_code == 400 or "image" in str(exc).lower()):
+                logger.warning("Multimodal request failed, falling back to text-only.")
+                image_data = None # Remove image and retry
+                messages = _build_messages(
+                    history, prompt, reply_text, settings, web_context, knowledge, image_data=None
+                )
+                continue
+
             if history and _is_context_overflow_error(exc) and attempts < max_attempts:
                 logger.info("Context overflow, trimming history for chat %s", chat_id)
                 history = trim_oldest_history(history)
