@@ -914,7 +914,8 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     if audio_obj:
-        if not detect_transcription_request(text):
+        is_private = update.effective_chat.type == ChatType.PRIVATE
+        if not is_private and not detect_transcription_request(text):
             audio_obj = None
 
     if audio_obj:
@@ -1034,11 +1035,18 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
         prompt = reply_text
         reply_text = ""
     if not prompt:
-        await _safe_reply_text(
-            update.message,
-            f"Сформулируй запрос после '{trigger_word}'."
-        )
-        return
+        if image_data:
+            # If there's an image but no text, provide a default prompt
+            prompt = "Опиши это изображение"
+        else:
+            if update.effective_chat.type == ChatType.PRIVATE:
+                await _safe_reply_text(update.message, "Пожалуйста, введи текст запроса.")
+            else:
+                await _safe_reply_text(
+                    update.message,
+                    f"Сформулируй запрос после '{trigger_word}'."
+                )
+            return
 
     web_context = ""
     web_results_text = ""
