@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import random
+import asyncio
 
 import aiofiles
 from app.config import (
@@ -44,6 +45,10 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CHAT_SETTINGS_FILE = DATA_DIR / "chat_settings.json"
 CHAT_HISTORY_FILE = DATA_DIR / "chat_history.json"
 CHAT_KNOWLEDGE_FILE = DATA_DIR / "chat_knowledge.json"
+
+_settings_lock = asyncio.Lock()
+_history_lock = asyncio.Lock()
+_knowledge_lock = asyncio.Lock()
 
 DEFAULT_SETTINGS = {
     "chat_title": "",
@@ -120,33 +125,36 @@ async def load_persisted_chat_settings():
 
 
 async def _write_chat_settings():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {str(chat_id): settings for chat_id, settings in CHAT_SETTINGS.items()}
-    try:
-        async with aiofiles.open(CHAT_SETTINGS_FILE, "w", encoding="utf-8") as stream:
-            await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-    except OSError:
-        return
+    async with _settings_lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {str(chat_id): settings for chat_id, settings in CHAT_SETTINGS.items()}
+        try:
+            async with aiofiles.open(CHAT_SETTINGS_FILE, "w", encoding="utf-8") as stream:
+                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+        except OSError:
+            return
 
 
 async def _write_chat_history():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {str(chat_id): history for chat_id, history in CHAT_MEMORY.items()}
-    try:
-        async with aiofiles.open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as stream:
-            await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-    except OSError:
-        return
+    async with _history_lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {str(chat_id): history for chat_id, history in CHAT_MEMORY.items()}
+        try:
+            async with aiofiles.open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as stream:
+                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+        except OSError:
+            return
 
 
 async def _write_chat_knowledge():
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {str(chat_id): knowledge for chat_id, knowledge in CHAT_KNOWLEDGE.items()}
-    try:
-        async with aiofiles.open(CHAT_KNOWLEDGE_FILE, "w", encoding="utf-8") as stream:
-            await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-    except OSError:
-        return
+    async with _knowledge_lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {str(chat_id): knowledge for chat_id, knowledge in CHAT_KNOWLEDGE.items()}
+        try:
+            async with aiofiles.open(CHAT_KNOWLEDGE_FILE, "w", encoding="utf-8") as stream:
+                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+        except OSError:
+            return
 
 
 async def persist_settings():

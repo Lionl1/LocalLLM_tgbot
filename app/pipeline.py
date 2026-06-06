@@ -189,19 +189,28 @@ def _fix_markdown_formatting(text):
     # Legacy Markdown mode in TG is sensitive to lone characters.
     # We only do this if NOT inside a code block (already handled by block logic).
     if not in_code_block:
-        # Balance bold **
+        # 1. Escape underscores inside words (e.g. user_id -> user\_id) to prevent Telegram italics bugs
+        result = re.sub(r'(?<=\w)_(?=\w)', r'\_', result)
+
+        # 2. Balance bold **
         if result.count("**") % 2 != 0:
             result = result.replace("**", "*", 1) # Reduce first lone ** to *
             if result.count("**") % 2 != 0:
                 result += "**" # append if still unbalanced
         
-        # Balance simple * (italic) - but be careful as it's used in lists
-        # This is a naive balancer.
-        stars = result.count("*")
+        # 3. Balance simple * (italic) - but ignore list items and escaped stars
+        # Replace double stars with temporary marker to count single stars
+        temp_text = result.replace("**", "")
+        stars = len(re.findall(r'(?<!\\)\*', temp_text))
         if stars % 2 != 0:
             # Check if it's a list star
             if not re.search(r"(?m)^\*\s", result):
                 result += "*"
+        
+        # 4. Balance simple _ (italic) if any remain unescaped
+        underscores = len(re.findall(r'(?<!\\)_', result))
+        if underscores % 2 != 0:
+            result += "_"
     
     return result
 

@@ -1,4 +1,6 @@
 import httpx
+import asyncio
+from ddgs import DDGS
 
 from app.config import (
     WEB_SEARCH_API_KEY,
@@ -12,82 +14,24 @@ class WebSearchError(RuntimeError):
     pass
 
 
-def _split_title_snippet(text):
-    if not text:
-        return "", ""
-    if " - " in text:
-        title, snippet = text.split(" - ", 1)
-        return title.strip(), snippet.strip()
-    return text.strip(), ""
-
-
-def _collect_ddg_results(data, limit):
-    results = []
-    abstract_text = (data.get("AbstractText") or "").strip()
-    if abstract_text:
-        title = (data.get("Heading") or "").strip() or "Кратко"
-        url = (data.get("AbstractURL") or "").strip()
-        results.append({"title": title, "url": url, "snippet": abstract_text})
-    answer = (data.get("Answer") or "").strip()
-    if answer:
-        results.append({"title": "Ответ", "url": "", "snippet": answer})
-    definition = (data.get("Definition") or "").strip()
-    if definition:
-        url = (data.get("DefinitionURL") or "").strip()
-        results.append({"title": "Определение", "url": url, "snippet": definition})
-    for item in data.get("Results", []):
-        text = item.get("Text", "").strip()
-        url = item.get("FirstURL", "").strip()
-        if not text and not url:
-            continue
-        title, snippet = _split_title_snippet(text)
-        results.append({"title": title, "url": url, "snippet": snippet})
-        if len(results) >= limit:
-            return results
-    for item in data.get("RelatedTopics", []):
-        if "Topics" in item:
-            for sub in item.get("Topics", []):
-                text = sub.get("Text", "").strip()
-                url = sub.get("FirstURL", "").strip()
-                if not text and not url:
-                    continue
-                title, snippet = _split_title_snippet(text)
-                results.append({"title": title, "url": url, "snippet": snippet})
-                if len(results) >= limit:
-                    return results
-            continue
-        text = item.get("Text", "").strip()
-        url = item.get("FirstURL", "").strip()
-        if not text and not url:
-            continue
-        title, snippet = _split_title_snippet(text)
-        results.append({"title": title, "url": url, "snippet": snippet})
-        if len(results) >= limit:
-            return results
-    return results
+def _ddg_search_sync(query, limit):
+    try:
+        with DDGS() as ddgs:
+            raw_results = list(ddgs.text(query, max_results=limit))
+        results = []
+        for item in raw_results:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("href", ""),
+                "snippet": item.get("body", "")
+            })
+        return results
+    except Exception as exc:
+        raise WebSearchError(f"DuckDuckGo search failed: {exc}") from exc
 
 
 async def _search_duckduckgo(query, limit):
-    url = "https://api.duckduckgo.com/"
-    params = {
-        "q": query,
-        "format": "json",
-        "no_redirect": "1",
-        "no_html": "1",
-        "skip_disambig": "1",
-    }
-    timeout = httpx.Timeout(WEB_SEARCH_TIMEOUT)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.get(url, params=params)
-    if response.status_code not in {200, 202}:
-        detail = response.text
-        if detail and len(detail) > 1000:
-            detail = f"{detail[:1000]}..."
-        raise WebSearchError(
-            f"DuckDuckGo error {response.status_code}: {detail}"
-        )
-    data = response.json()
-    return _collect_ddg_results(data, limit)
+    return await asyncio.to_thread(_ddg_search_sync, query, limit)
 
 
 async def _search_serper(query, limit):

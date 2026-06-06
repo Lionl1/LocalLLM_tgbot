@@ -886,6 +886,27 @@ async def chat_member_handler(update, context: ContextTypes.DEFAULT_TYPE):
         logger.info("Bot added to group %s by user %s", chat_id, user_id)
 
 
+_TOOL_KEYWORDS = {
+    # Image related
+    "нарисуй", "картинк", "изображен", "рисун", "сгенерир", "напиши портрет", "draw", "paint", "picture", "image", "photo", "illustrat",
+    # Search related
+    "найди", "поиск", "погугл", "интернет", "новости", "search", "google", "find", "узнай", "последн", "свеж", "погод", "weather",
+    "кто такой", "что такое", "что за", "news", "latest", "info", "справк", "информаци", "сведения"
+}
+
+
+def _might_need_tools(prompt: str) -> bool:
+    if not prompt:
+        return False
+    prompt_lower = prompt.casefold()
+    for kw in _TOOL_KEYWORDS:
+        if kw in prompt_lower:
+            return True
+    if len(prompt) > 80:
+        return True
+    return False
+
+
 async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
@@ -1057,7 +1078,7 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     if WEB_SEARCH_ENABLED:
         available_tools.append(_FUNCTION_CALLING_TOOLS[1])
         
-    if available_tools and prompt:
+    if available_tools and prompt and _might_need_tools(prompt):
         try:
             # We use a specialized system prompt for weak models to trigger tools via text if JSON fails.
             fallback_system = (
