@@ -39,16 +39,48 @@ CHAT_MEMORY = {}
 CHAT_KNOWLEDGE = {}
 CHAT_SETTINGS = {}
 CHAT_SEEN_USERS = {}
+CHAT_LOGS = {}
 LAST_RAW_TRANSCRIPTION = {}
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 CHAT_SETTINGS_FILE = DATA_DIR / "chat_settings.json"
 CHAT_HISTORY_FILE = DATA_DIR / "chat_history.json"
 CHAT_KNOWLEDGE_FILE = DATA_DIR / "chat_knowledge.json"
+CHAT_LOGS_FILE = DATA_DIR / "chat_logs.json"
 
 _settings_lock = asyncio.Lock()
 _history_lock = asyncio.Lock()
 _knowledge_lock = asyncio.Lock()
+_logs_lock = asyncio.Lock()
+
+PERSONAS = {
+    "default": {
+        "name": "По умолчанию",
+        "description": "Стандартный сбалансированный характер",
+        "prompt": SYSTEM_PROMPT
+    },
+    "coder": {
+        "name": "Программист",
+        "description": "Прямолинейный и точный IT-специалист",
+        "prompt": "You are a professional software engineer. Speak technically, be direct, provide code blocks, and explain concepts clearly without fluff. Reply in Russian."
+    },
+    "pirate": {
+        "name": "Пират",
+        "description": "Дерзкий морской волк",
+        "prompt": "You are a funny, loud, and adventurous pirate captain. Speak in pirate slang, refer to users as 'matey', make jokes, and mention sailing and treasures. Reply in Russian."
+    },
+    "therapist": {
+        "name": "Психотерапевт",
+        "description": "Эмпатичный и понимающий психоаналитик",
+        "prompt": "You are an empathetic, calm, and supportive therapist. Ask open questions, show deep understanding, and encourage emotional reflection. Reply in Russian."
+    },
+    "critic": {
+        "name": "Критик",
+        "description": "Ироничный и саркастичный скептик",
+        "prompt": "You are a sarcastic, cynical, but wittily entertaining critic. Tease user's ideas playfully, use dark humor, and be lightheartedly skeptical. Reply in Russian."
+    }
+}
+
 
 DEFAULT_SETTINGS = {
     "chat_title": "",
@@ -123,6 +155,21 @@ async def load_persisted_chat_settings():
         except (OSError, json.JSONDecodeError):
             pass
 
+    # Load logs
+    if CHAT_LOGS_FILE.exists():
+        try:
+            async with aiofiles.open(CHAT_LOGS_FILE, "r", encoding="utf-8") as stream:
+                content = await stream.read()
+                raw = json.loads(content)
+                for raw_chat_id, logs in raw.items():
+                    try:
+                        chat_id = int(raw_chat_id)
+                        CHAT_LOGS[chat_id] = logs
+                    except (TypeError, ValueError):
+                        continue
+        except (OSError, json.JSONDecodeError):
+            pass
+
 
 async def _write_chat_settings():
     async with _settings_lock:
@@ -165,6 +212,39 @@ async def persist_history():
 
 async def persist_knowledge():
     await _write_chat_knowledge()
+
+
+async def _write_chat_logs():
+    async with _logs_lock:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {str(chat_id): logs for chat_id, logs in CHAT_LOGS.items()}
+        try:
+            async with aiofiles.open(CHAT_LOGS_FILE, "w", encoding="utf-8") as stream:
+                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
+        except OSError:
+            return
+
+
+async def persist_logs():
+    await _write_chat_logs()
+
+
+async def append_chat_log(chat_id, sender_name, text):
+    logs = CHAT_LOGS.setdefault(chat_id, [])
+    logs.append({"sender": sender_name, "text": text})
+    if len(logs) > 50:
+        del logs[:-50]
+    await persist_logs()
+
+
+def get_chat_logs(chat_id):
+    return CHAT_LOGS.setdefault(chat_id, [])
+
+
+async def clear_chat_logs(chat_id):
+    CHAT_LOGS.pop(chat_id, None)
+    await persist_logs()
+
 
 def get_settings(chat_id):
     settings = CHAT_SETTINGS.get(chat_id)

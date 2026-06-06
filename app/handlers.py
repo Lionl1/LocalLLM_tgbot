@@ -63,6 +63,11 @@ from app.state import (
     get_raw_transcription,
     get_all_known_groups,
     clear_knowledge,
+    get_knowledge,
+    append_chat_log,
+    get_chat_logs,
+    clear_chat_logs,
+    PERSONAS,
 )
 from app.text_utils import (
     _estimate_tokens,
@@ -613,6 +618,99 @@ async def never_command(update, context):
         await _safe_reply_text(update.message, "Не удалось сгенерировать утверждение. Попробуйте еще раз!")
 
 
+async def summary_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    chat_id = update.effective_chat.id
+    logs = get_chat_logs(chat_id)
+    if not logs or len(logs) < 3:
+        await _safe_reply_text(
+            update.message,
+            "Недостаточно сообщений в истории чата для создания выжимки. Пообщайтесь еще немного!"
+        )
+        return
+
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    
+    dialogue = ""
+    for log in logs:
+        dialogue += f"{log['sender']}: {log['text']}\n"
+
+    system_prompt = (
+        "You are an expert secretary assistant. Your task is to write a structured, clear, and concise summary "
+        "of the conversation logs provided. Highlight main topics discussed, what key points each user made, "
+        "and any decisions or action items. Keep the tone professional but warm. Do not add intro/outro greetings. "
+        "Write in Russian."
+    )
+    user_prompt = f"Here are the recent chat messages:\n{dialogue}"
+
+    try:
+        response = await chat_completion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=1024,
+            temperature=0.4
+        )
+        if response:
+            msg = f"📋 *Выжимка последних обсуждений в чате:*\n\n{response.strip()}"
+            await _safe_reply_text(update.message, msg, parse_mode="Markdown")
+        else:
+            await _safe_reply_text(update.message, "Не удалось сгенерировать выжимку чата.")
+    except Exception as exc:
+        logger.error("Failed to generate chat summary: %s", exc)
+        await _safe_reply_text(update.message, "Произошла ошибка при генерации саммари.")
+
+
+async def persona_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    
+    chat = update.effective_chat
+    user = update.effective_user
+    chat_id = chat.id
+    
+    if chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        if not await _is_group_admin(context.bot, chat_id, user.id):
+            await _safe_reply_text(update.message, "Только администраторы могут менять характер бота.")
+            return
+
+    args = context.args
+    if args:
+        requested = args[0].strip().lower()
+        if requested in PERSONAS:
+            settings = get_settings(chat_id)
+            settings["system_prompt"] = PERSONAS[requested]["prompt"]
+            await persist_settings()
+            await _safe_reply_text(
+                update.message,
+                f"🎭 *Характер бота успешно изменен на «{PERSONAS[requested]['name']}»*\n\n_{PERSONAS[requested]['description']}_",
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            options = ", ".join(PERSONAS.keys())
+            await _safe_reply_text(
+                update.message,
+                f"Неизвестный характер: {requested}. Доступные варианты: {options}"
+            )
+            return
+
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    keyboard_buttons = []
+    for key, p_info in PERSONAS.items():
+        keyboard_buttons.append([InlineKeyboardButton(f"{p_info['name']} — {p_info['description']}", callback_data=f"set_persona_{key}")])
+    
+    keyboard = InlineKeyboardMarkup(keyboard_buttons)
+    await _safe_reply_text(
+        update.message,
+        "🎭 *Выберите характер бота из списка ниже:*",
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+
 async def settings_command(update, context):
     if not await _ensure_update_allowed(update, context):
         return
@@ -810,6 +908,21 @@ async def settings_button(update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id if query.from_user else None
     data = query.data or ""
 
+    if data.startswith("set_persona_"):
+        persona_key = data.replace("set_persona_", "")
+        if persona_key in PERSONAS:
+            if query.message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
+                if not await _is_group_admin(context.bot, chat_id, user_id):
+                    await query.answer("Только администраторы могут менять характер бота.", show_alert=True)
+                    return
+            settings["system_prompt"] = PERSONAS[persona_key]["prompt"]
+            await persist_settings()
+            await query.edit_message_text(
+                f"🎭 *Характер бота успешно изменен на «{PERSONAS[persona_key]['name']}»*\n\n_{PERSONAS[persona_key]['description']}_",
+                parse_mode="Markdown"
+            )
+        return
+
     keyboard = None
     if query.message.chat.type == ChatType.PRIVATE:
         keyboard = await _get_admin_settings_keyboard(context.bot, user_id, chat_id, chat_id)
@@ -1005,6 +1118,8 @@ async def post_init(application):
         BotCommand("reset", "Сбросить контекст диалога"),
         BotCommand("resetkb", "Сбросить базу знаний (память)"),
         BotCommand("memory", "Показать сохраненную память (KB)"),
+        BotCommand("summary", "Сделать выжимку последних 50 сообщений"),
+        BotCommand("persona", "Сменить характер (персону) бота"),
         BotCommand("truth", "Правда (игра «Правда или Действие»)"),
         BotCommand("dare", "Действие (игра «Правда или Действие»)"),
         BotCommand("never", "Игра «Я никогда не...»"),
@@ -1198,6 +1313,11 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user and not user.is_bot:
         mark_user_seen(chat_id, user.id, user.username, user.first_name)
+        if text and not text.startswith("/"):
+            sender_name = user.first_name or "Игрок"
+            if user.username:
+                sender_name = f"{sender_name} (@{user.username})"
+            asyncio.create_task(append_chat_log(chat_id, sender_name, text))
         
     settings = get_settings(chat_id)
     if update.effective_chat.type in {ChatType.GROUP, ChatType.SUPERGROUP} and update.effective_chat.title:
