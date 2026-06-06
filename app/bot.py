@@ -23,6 +23,10 @@ from app.handlers import (
     web_app_data_handler,
     toggle_syntax_command,
     chat_member_handler,
+    memory_command,
+    truth_command,
+    dare_command,
+    never_command,
 )
 
 logging.basicConfig(
@@ -40,6 +44,11 @@ def main():
     application.add_handler(CommandHandler("search", search_command))
     application.add_handler(CommandHandler("reset", reset_command))
     application.add_handler(CommandHandler("resetkb", reset_kb_command))
+    application.add_handler(CommandHandler("memory", memory_command))
+    application.add_handler(CommandHandler("kb", memory_command))
+    application.add_handler(CommandHandler("truth", truth_command))
+    application.add_handler(CommandHandler("dare", dare_command))
+    application.add_handler(CommandHandler("never", never_command))
     application.add_handler(CommandHandler("settings", settings_command))
     application.add_handler(CommandHandler("image", image_command))
     application.add_handler(CommandHandler("setmood", set_mood_command))

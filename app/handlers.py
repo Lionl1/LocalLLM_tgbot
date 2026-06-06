@@ -116,6 +116,34 @@ _FUNCTION_CALLING_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "calculate",
+            "description": "Evaluate a mathematical expression. Use this for math questions and calculations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "Math expression to evaluate, e.g. '2 + 2 * 2' or 'math.sqrt(144)'. Use standard Python math operators.",
+                    }
+                },
+                "required": ["expression"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "current_datetime",
+            "description": "Get the current date and time on the server.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
 ]
 # --- End Function Calling Tools Definition ---
 
@@ -450,6 +478,139 @@ async def reset_kb_command(update, context):
     clear_knowledge(chat_id)
     await persist_knowledge()
     await _safe_reply_text(update.message, "База знаний (хроническая память) очищена.")
+
+
+async def memory_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    chat_id = update.effective_chat.id
+    kb = get_knowledge(chat_id)
+    if not kb:
+        await _safe_reply_text(update.message, "Моя память о вас пока пуста. Поговорите со мной, и я запомню важные факты!")
+        return
+    
+    msg = f"🧠 *Вот что я помню о вас и нашем общении:*\n\n{kb}"
+    await _safe_reply_text(update.message, msg, parse_mode="Markdown")
+
+
+async def truth_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    chat_id = update.effective_chat.id
+    sender = update.effective_user
+    
+    # Pick a target player
+    target = get_random_seen_user(chat_id, exclude_user_id=sender.id if sender else None)
+    if not target and sender:
+        target = {"username": sender.username, "first_name": sender.first_name}
+    
+    if not target:
+        await _safe_reply_text(update.message, "Не могу найти игроков в чате.")
+        return
+        
+    target_mention = f"@{target['username']}" if target.get("username") else target.get("first_name", "игрок")
+    
+    system_prompt = (
+        "You are a host of 'Truth or Dare' game. "
+        "Generate a funny, provocative, or interesting 'Truth' question for the target user. "
+        "The question must ask them to reveal a secret, preference, or past funny story. "
+        "Keep it playful and match the tone of the bot. "
+        "Return ONLY the question, no introductions or meta-text."
+    )
+    
+    prompt = f"Target user: {target_mention}. Generate a 'Truth' question."
+    
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    try:
+        response = await chat_completion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=256,
+            temperature=0.8
+        )
+        if response:
+            msg = f"🎲 *Игра «Правда или Действие»*\n\nВопрос для {target_mention}:\n\n💬 *{response.strip()}*"
+            await _safe_reply_text(update.message, msg, parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("Failed to generate truth question: %s", exc)
+        await _safe_reply_text(update.message, "Не удалось сгенерировать вопрос. Попробуйте еще раз!")
+
+
+async def dare_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    chat_id = update.effective_chat.id
+    sender = update.effective_user
+    
+    # Pick a target player
+    target = get_random_seen_user(chat_id, exclude_user_id=sender.id if sender else None)
+    if not target and sender:
+        target = {"username": sender.username, "first_name": sender.first_name}
+        
+    if not target:
+        await _safe_reply_text(update.message, "Не могу найти игроков в чате.")
+        return
+        
+    target_mention = f"@{target['username']}" if target.get("username") else target.get("first_name", "игрок")
+    
+    system_prompt = (
+        "You are a host of 'Truth or Dare' game. "
+        "Generate a funny, playful, or slightly challenging 'Dare' task for the target user. "
+        "The task must be doable online in this Telegram chat (e.g. write a short poem, change profile bio, send a funny sticker, write something weird). "
+        "Keep it playful and match the tone of the bot. "
+        "Return ONLY the task, no introductions or meta-text."
+    )
+    
+    prompt = f"Target user: {target_mention}. Generate a 'Dare' task."
+    
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    try:
+        response = await chat_completion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=256,
+            temperature=0.8
+        )
+        if response:
+            msg = f"🎲 *Игра «Правда или Действие»*\n\nЗадание для {target_mention}:\n\n🔥 *{response.strip()}*"
+            await _safe_reply_text(update.message, msg, parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("Failed to generate dare task: %s", exc)
+        await _safe_reply_text(update.message, "Не удалось сгенерировать задание. Попробуйте еще раз!")
+
+
+async def never_command(update, context):
+    if not await _ensure_update_allowed(update, context):
+        return
+    chat_id = update.effective_chat.id
+    
+    system_prompt = (
+        "You are a host of 'Never Have I Ever' game. "
+        "Generate a single interesting, funny, or slightly provocative statement starting with 'Я никогда не...' (in the language of the conversation). "
+        "It should be something common yet entertaining for a group of friends. "
+        "Return ONLY the statement, no introductions or meta-text."
+    )
+    
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    try:
+        response = await chat_completion(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": "Generate a 'Never Have I Ever' statement."}
+            ],
+            max_tokens=256,
+            temperature=0.8
+        )
+        if response:
+            msg = f"🍷 *Игра «Я никогда не...»*\n\n🔥 *{response.strip()}*\n\n_Признавайтесь в комментариях!_"
+            await _safe_reply_text(update.message, msg, parse_mode="Markdown")
+    except Exception as exc:
+        logger.error("Failed to generate never statement: %s", exc)
+        await _safe_reply_text(update.message, "Не удалось сгенерировать утверждение. Попробуйте еще раз!")
 
 
 async def settings_command(update, context):
@@ -843,6 +1004,10 @@ async def post_init(application):
     base_commands = [
         BotCommand("reset", "Сбросить контекст диалога"),
         BotCommand("resetkb", "Сбросить базу знаний (память)"),
+        BotCommand("memory", "Показать сохраненную память (KB)"),
+        BotCommand("truth", "Правда (игра «Правда или Действие»)"),
+        BotCommand("dare", "Действие (игра «Правда или Действие»)"),
+        BotCommand("never", "Игра «Я никогда не...»"),
         BotCommand("image", "Сгенерировать картинку"),
         BotCommand("help", "Краткая справка"),
         BotCommand("search", "Поиск в интернете"),
@@ -891,7 +1056,11 @@ _TOOL_KEYWORDS = {
     "нарисуй", "картинк", "изображен", "рисун", "сгенерир", "напиши портрет", "draw", "paint", "picture", "image", "photo", "illustrat",
     # Search related
     "найди", "поиск", "погугл", "интернет", "новости", "search", "google", "find", "узнай", "последн", "свеж", "погод", "weather",
-    "кто такой", "что такое", "что за", "news", "latest", "info", "справк", "информаци", "сведения"
+    "кто такой", "что такое", "что за", "news", "latest", "info", "справк", "информаци", "сведения",
+    # Math related
+    "посчитай", "вычисли", "сколько будет", "умножить", "разделить", "сложить", "вычесть", "корень", "calculate", "math", "evaluate", "plus", "minus",
+    # Datetime related
+    "время", "дата", "число", "какой сегодня день", "какой год", "time", "date", "today", "year"
 }
 
 
@@ -905,6 +1074,35 @@ def _might_need_tools(prompt: str) -> bool:
     if len(prompt) > 80:
         return True
     return False
+
+
+def _safe_eval_math(expression: str) -> str:
+    cleaned = expression.strip()
+    if not cleaned:
+        return "Empty expression"
+    if len(cleaned) > 100:
+        return "Expression too long"
+    import re
+    if not re.match(r'^[a-zA-Z0-9+\-*/().\s]*$', cleaned):
+        return "Invalid characters in expression."
+    allowed_words = {"math", "sqrt", "sin", "cos", "tan", "log", "pi", "e", "pow", "abs"}
+    words = re.findall(r'[a-zA-Z]+', cleaned)
+    for word in words:
+        if word not in allowed_words:
+            return f"Security error: word '{word}' is not allowed in expression."
+    try:
+        import math
+        safe_dict = {
+            "abs": abs,
+            "round": round,
+            "min": min,
+            "max": max,
+            "math": math,
+        }
+        result = eval(cleaned, {"__builtins__": {}}, safe_dict)
+        return str(result)
+    except Exception as e:
+        return f"Error evaluating expression: {e}"
 
 
 async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
@@ -1073,10 +1271,12 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     web_results_text = ""
     
     available_tools = []
-    if IMAGE_GENERATION_ENABLED:
-        available_tools.append(_FUNCTION_CALLING_TOOLS[0])
-    if WEB_SEARCH_ENABLED:
-        available_tools.append(_FUNCTION_CALLING_TOOLS[1])
+    for tool in _FUNCTION_CALLING_TOOLS:
+        if tool["function"]["name"] == "generate_image" and not IMAGE_GENERATION_ENABLED:
+            continue
+        if tool["function"]["name"] == "search_web" and not WEB_SEARCH_ENABLED:
+            continue
+        available_tools.append(tool)
         
     if available_tools and prompt and _might_need_tools(prompt):
         try:
@@ -1084,6 +1284,8 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             fallback_system = (
                 "You are a routing assistant. If the user wants an image, reply ONLY with [GENERATE_IMAGE: descriptive prompt]. "
                 "If the user wants a web search, reply ONLY with [SEARCH_WEB: search query]. "
+                "If the user wants to calculate a math expression, reply ONLY with [CALCULATE: python math expression]. "
+                "If the user wants to know the current date or time, reply ONLY with [CURRENT_DATETIME]. "
                 "Otherwise, reply with 'NORMAL'."
             )
             tool_messages = [
@@ -1092,13 +1294,22 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             ]
             
             # First attempt with standard tool calling (if model supports it)
-            response_text, tool_calls = await chat_completion(
-                tool_messages,
-                tools=available_tools,
-                tool_choice="auto",
-                temperature=0.1,
-                max_tokens=100
-            )
+            try:
+                response_text, tool_calls = await chat_completion(
+                    tool_messages,
+                    tools=available_tools,
+                    tool_choice="auto",
+                    temperature=0.1,
+                    max_tokens=100
+                )
+            except Exception as exc:
+                logger.warning("Native tool calling failed, falling back to text routing: %s", exc)
+                response_text = await chat_completion(
+                    tool_messages,
+                    temperature=0.1,
+                    max_tokens=100
+                )
+                tool_calls = []
             
             # Process standard tool calls
             if tool_calls:
@@ -1125,6 +1336,14 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                             )
                     except WebSearchError as exc:
                         logger.warning("Web search failed: %s", exc)
+                elif function_name == "calculate":
+                    expression = function_args.get("expression", "")
+                    result = _safe_eval_math(expression)
+                    web_context = f"Calculation result: {expression} = {result}"
+                elif function_name == "current_datetime":
+                    from datetime import datetime
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    web_context = f"Current server date and time: {now_str}"
 
             # Fallback for weak models: Check text response for [TAGS]
             elif response_text:
@@ -1144,6 +1363,14 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
                             web_context = f"Data from the internet:\n{web_results_text}"
                     except Exception:
                         pass
+                elif "[CALCULATE:" in response_text:
+                    expression = response_text.split("[CALCULATE:")[1].split("]")[0].strip()
+                    result = _safe_eval_math(expression)
+                    web_context = f"Calculation result: {expression} = {result}"
+                elif "[CURRENT_DATETIME]" in response_text:
+                    from datetime import datetime
+                    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    web_context = f"Current server date and time: {now_str}"
         except Exception as exc:
             logger.warning("Tool routing failed: %s", exc)
 
