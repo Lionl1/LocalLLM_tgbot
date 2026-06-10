@@ -25,8 +25,12 @@ def _compose_system_prompt(settings, knowledge=""):
         kb_limit = CONTEXT_LIMIT_TOKENS // 4
         if _estimate_tokens(knowledge) > kb_limit:
             knowledge = _trim_to_char_limit(knowledge, kb_limit * 4) # approx tokens to chars
-            knowledge += "\n... [knowledge base truncated]"
-        parts.append(f"CHRONIC MEMORY (Knowledge Base):\n{knowledge}")
+            knowledge += "\n... [knowledge truncated]"
+        parts.append(
+            f"FACTS & CONTEXT:\n{knowledge}\n\n"
+            "Use these facts naturally to maintain conversation continuity. "
+            "Do NOT explicitly mention having a 'memory' or 'knowledge base'."
+        )
     if settings["context_policy"]:
         parts.append(f"Context rules: {settings['context_policy']}")
     priority = _priority_instruction(settings)
