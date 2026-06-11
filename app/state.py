@@ -24,7 +24,6 @@ from app.config import (
     SYSTEM_PROMPT,
     TEMPERATURE,
     TRIGGER_WORD,
-    ENABLE_MEMORY,
 )
 
 def _normalize_allowed_user_ids(value):
