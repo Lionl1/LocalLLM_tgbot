@@ -107,6 +107,12 @@
 
     <div class="form-group">
         <label class="checkbox-label">
+            <input type="checkbox" id="memory"> <span id="l_memory">Enable chronic memory (KB)</span>
+        </label>
+    </div>
+
+    <div class="form-group">
+        <label class="checkbox-label">
             <input type="checkbox" id="random_questions"> <span id="l_random_questions">Allow random prompts</span>
         </label>
     </div>
@@ -147,6 +153,7 @@
                 v_eugene: "Евгений (Мужской 2)",
                 v_random: "Случайный голос",
                 l_syntax: "Включить проверку синтаксиса",
+                l_memory: "Включить долгосрочную память (KB)",
                 l_random_questions: "Разрешить случайные сообщения",
                 l_rqp: "Вероятность генерации вопроса (от 0 до 1)",
                 l_rpp: "Вероятность участия в диалоге (от 0 до 1)",
@@ -173,6 +180,7 @@
                 v_eugene: "Eugene (Male 2)",
                 v_random: "Random voice",
                 l_syntax: "Enable syntax correction",
+                l_memory: "Enable chronic memory (KB)",
                 l_random_questions: "Allow random prompts",
                 l_rqp: "Random question probability (0 to 1)",
                 l_rpp: "Random participation probability (0 to 1)",
@@ -231,6 +239,7 @@
             document.getElementById('max_tokens').value = chat.mt || 4096;
             document.getElementById('voice').value = chat.vr || "false";
             document.getElementById('syntax').checked = chat.cs === true;
+            document.getElementById('memory').checked = chat.em !== false;
             document.getElementById('random_questions').checked = chat.rq !== false;
             document.getElementById('random_question_prob').value = (chat.rqp !== undefined) ? chat.rqp : 0.05;
             document.getElementById('random_participation_prob').value = (chat.rpp !== undefined) ? chat.rpp : 0.1;
@@ -258,6 +267,7 @@
                 max_tokens: document.getElementById("max_tokens").value || 4096,
                 voice_response: voiceVal,
                 check_syntax: document.getElementById("syntax").checked,
+                enable_memory: document.getElementById('memory').checked,
                 random_questions: document.getElementById('random_questions').checked,
                 random_question_prob: document.getElementById('random_question_prob').value,
                 random_participation_prob: document.getElementById('random_participation_prob').value

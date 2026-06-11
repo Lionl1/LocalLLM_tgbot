@@ -42,6 +42,7 @@ def _format_settings(settings):
             else "Лимит символов: не установлен"
         ),
         f"Лимит токенов: {settings['max_tokens']}",
+        f"Память (KB): {'ВКЛ' if settings.get('enable_memory', True) else 'ВЫКЛ'}",
         f"Проверка синтаксиса: {'ВКЛ' if settings.get('check_syntax') else 'ВЫКЛ'}",
         f"Голосовой ответ: {voice_label}",
         f"Случайные сообщения: {'ВКЛ' if settings.get('random_questions', True) else 'ВЫКЛ'}",
@@ -70,6 +71,7 @@ def _settings_keyboard(manageable_chats=None, current_chat_id=None):
                 "mt": s.get("max_tokens", 4096),
                 "vr": voice_val if voice_val else "false",
                 "cs": True if s.get("check_syntax") else False,
+                "em": True if s.get("enable_memory", True) else False,
                 "rq": True if s.get("random_questions", True) else False,
                 "rqp": s.get("random_question_prob", RANDOM_QUESTION_PROBABILITY),
                 "rpp": s.get("random_participation_prob", RANDOM_PARTICIPATION_PROBABILITY)
