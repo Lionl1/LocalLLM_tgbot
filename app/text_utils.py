@@ -55,9 +55,13 @@ def _format_search_results(results, query):
 
 def _is_reply_to_bot(update, bot_id):
     reply = update.message.reply_to_message
-    if not reply or not reply.from_user:
+    if not reply:
         return False
-    return reply.from_user.id == bot_id
+    if reply.from_user and reply.from_user.id == bot_id:
+        return True
+    if reply.forward_from and reply.forward_from.id == bot_id:
+        return True
+    return False
 
 
 def _is_triggered(update, text, bot_id, bot_username, trigger_word):

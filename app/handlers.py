@@ -1224,9 +1224,22 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message:
         return
         
+    chat_id = update.effective_chat.id
+    bot_username = context.bot.username or ""
+    settings = get_settings(chat_id)
+    trigger_word = settings.get("trigger_word", "")
+
     audio_obj = update.message.voice or update.message.audio or update.message.video_note
     photo_obj = update.message.photo[-1] if update.message.photo else None
     text = update.message.text or update.message.caption or ""
+
+    # Try to extract media from the replied-to message if the message itself has none
+    if not audio_obj and update.message.reply_to_message:
+        reply = update.message.reply_to_message
+        audio_obj = reply.voice or reply.audio or reply.video_note
+    if not photo_obj and update.message.reply_to_message:
+        reply = update.message.reply_to_message
+        photo_obj = reply.photo[-1] if reply.photo else None
 
     if not text and not audio_obj and not photo_obj:
         return
@@ -1249,7 +1262,8 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
 
     if audio_obj:
         is_private = update.effective_chat.type == ChatType.PRIVATE
-        if not is_private and not detect_transcription_request(text):
+        prompt_temp = _extract_prompt(text, bot_username, trigger_word)
+        if not is_private and not detect_transcription_request(text) and prompt_temp != "":
             audio_obj = None
 
     if audio_obj:
@@ -1305,8 +1319,6 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             await _safe_reply_text(update.message, "Ошибка обработки голосового сообщения.")
             return
 
-    bot_username = context.bot.username or ""
-    chat_id = update.effective_chat.id
     if not await _ensure_update_allowed(update, context):
         return
         
@@ -1318,8 +1330,6 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             if user.username:
                 sender_name = f"{sender_name} (@{user.username})"
             asyncio.create_task(append_chat_log(chat_id, sender_name, text))
-        
-    settings = get_settings(chat_id)
     if update.effective_chat.type in {ChatType.GROUP, ChatType.SUPERGROUP} and update.effective_chat.title:
         if settings.get("chat_title") != update.effective_chat.title:
             settings["chat_title"] = update.effective_chat.title
@@ -1344,7 +1354,6 @@ async def handle_message(update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    trigger_word = settings["trigger_word"]
     if not _is_triggered(update, text, context.bot.id, bot_username, trigger_word):
         if update.effective_chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
             if not settings.get("random_questions", True):
