@@ -68,3 +68,10 @@ def test_estimate_messages_tokens():
 def test_detect_transcription_request():
     assert detect_transcription_request("Расшифруй, пожалуйста")
     assert not detect_transcription_request("привет")
+
+
+def test_trigger_must_be_a_whole_word():
+    assert not _is_triggered(make_update(), "Нукаем дальше", 1, "bot", "Нука")
+    assert not _is_triggered(make_update(), "@bot_fan привет", 1, "bot", "Нука")
+    assert _is_triggered(make_update(), "Нука!", 1, "bot", "Нука")
+    assert _extract_prompt("Нукаем дальше", "bot", "Нука") == "Нукаем дальше"
