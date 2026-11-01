@@ -13,9 +13,17 @@ def _strip_leading(text):
     return text.lstrip(" \t\r\n")
 
 
+def _has_prefix(text, prefix):
+    """True if text starts with prefix as a whole word ("Нука," but not "Нукаем")."""
+    if not prefix or not _normalize(text).startswith(_normalize(prefix)):
+        return False
+    rest = text[len(prefix) :]
+    return not rest or not (rest[0].isalnum() or rest[0] == "_")
+
+
 def _strip_after_prefix(text, prefix):
     stripped = _strip_leading(text)
-    if _normalize(stripped).startswith(_normalize(prefix)):
+    if _has_prefix(stripped, prefix):
         remainder = stripped[len(prefix) :]
         return remainder.lstrip(" \t\r\n,.:;—-")
     return text
@@ -33,8 +41,7 @@ def _strip_trigger(text, trigger_word):
 
 
 def _starts_with_prefix(text, prefix):
-    stripped = _strip_leading(text)
-    return _normalize(stripped).startswith(_normalize(prefix))
+    return _has_prefix(_strip_leading(text), prefix)
 
 
 
