@@ -66,7 +66,6 @@ from app.state import (
     get_knowledge,
     append_chat_log,
     get_chat_logs,
-    clear_chat_logs,
     PERSONAS,
 )
 from app.text_utils import (
@@ -416,7 +415,7 @@ async def help_command(update, context):
     if not await _ensure_update_allowed(update, context):
         return
     chat_id = update.effective_chat.id
-    settings = get_settings(chat_id)
+    get_settings(chat_id)  # registers the chat among known chats
     text = (
         "Команды:\n"
         "/settings — открыть настройки\n"
@@ -591,8 +590,7 @@ async def dare_command(update, context):
 async def never_command(update, context):
     if not await _ensure_update_allowed(update, context):
         return
-    chat_id = update.effective_chat.id
-    
+
     system_prompt = (
         "You are a host of 'Never Have I Ever' game. "
         "Generate a single interesting, funny, or slightly provocative statement starting with 'Я никогда не...' (in the language of the conversation). "
