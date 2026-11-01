@@ -7,12 +7,9 @@ requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.13.0",
     "aiofiles>=25.1.0",
-    "aiogram>=3.26.0",
     "ddgs>=9.14.3",
     "diffusers>=0.37.0",
-    "duckduckgo-search>=8.1.1",
     "httpx==0.26.0",
-    "langchain==0.2.16",
     "langchain-openai==0.1.22",
     "omegaconf>=2.3.0",
     "openai-whisper>=20250625",
