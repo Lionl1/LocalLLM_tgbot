@@ -3,6 +3,7 @@ import logging
 import gc
 from io import BytesIO
 
+from app.config import IMAGE_GENERATION_HEIGHT, IMAGE_GENERATION_WIDTH
 from app.llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
@@ -91,8 +92,8 @@ def _generate_sync(prompt: str) -> bytes:
             negative_prompt=negative_prompt,
             num_inference_steps=15,
             guidance_scale=7,
-            height=256,
-            width=256
+            height=IMAGE_GENERATION_HEIGHT,
+            width=IMAGE_GENERATION_WIDTH
         )
         image = result.images[0]
         

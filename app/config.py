@@ -10,6 +10,13 @@ def _get_env(name, default=None, required=False):
         raise RuntimeError(f"Missing required env var: {name}")
     return value
 
+
+def _get_bool_env(name, default):
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
 TELEGRAM_BOT_TOKEN = _get_env("TELEGRAM_BOT_TOKEN", required=True)
 
 OPENAI_API_KEY = _get_env("OPENAI_API_KEY", "not-needed")
@@ -60,4 +67,6 @@ RANDOM_QUESTION_PROBABILITY = float(os.getenv("RANDOM_QUESTION_PROBABILITY", "0.
 RANDOM_PARTICIPATION_PROBABILITY = float(os.getenv("RANDOM_PARTICIPATION_PROBABILITY", "0.000000000000001"))
 RANDOM_QUESTIONS = False
 
-IMAGE_GENERATION_ENABLED = True
+IMAGE_GENERATION_ENABLED = _get_bool_env("IMAGE_GENERATION_ENABLED", True)
+IMAGE_GENERATION_WIDTH = int(_get_env("IMAGE_GENERATION_WIDTH", "256"))
+IMAGE_GENERATION_HEIGHT = int(_get_env("IMAGE_GENERATION_HEIGHT", "256"))

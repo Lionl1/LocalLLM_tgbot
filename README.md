@@ -2,7 +2,7 @@
 
 Python Telegram bot that talks through a local LLM exposed via an OpenAI-compatible API
 (such as vLLM, LM Studio, or Ollama) and uses LangChain for the response pipeline.
-In group chats it replies when a message starts with the trigger word (default: `Nuka`, configurable)
+In group chats it replies when a message starts with the trigger word (default: `Нука`, configurable)
 or when someone replies to one of the bot's messages.
 
 The bot is intended for international use:
@@ -41,7 +41,7 @@ Because the bot runs local models (for example Whisper for audio and Stable Diff
 The project includes a Telegram Web App interface for bot settings. To use it, host the HTML file on GitHub Pages:
 
 1. Create a public GitHub repository, for example `bot-settings`.
-2. Copy the contents of `app/index.html` from this project into an `index.html` file in that repository.
+2. Copy the contents of `index.html` from this project into an `index.html` file in that repository.
 3. Open `Settings -> Pages`, choose the `main` (or `master`) branch, and save.
 4. GitHub will publish a URL like `https://your-name.github.io/bot-settings/`.
 5. Add that URL to `.env`:
@@ -93,7 +93,7 @@ uv run python main.py
 - `app/state.py` - chat memory and settings storage
 - `app/text_utils.py` - text parsing and message splitting helpers
 - `app/ui.py` - keyboard builders and settings formatting
-- `app/index.html` - Telegram Mini App template for settings
+- `index.html` - Telegram Mini App template for settings
 
 ## Docker
 
@@ -128,7 +128,7 @@ If the local LLM runs on the host machine, `localhost` inside the container will
 ## Usage
 
 - **Private chats:** the bot replies to any text message.
-- **Groups:** mention the trigger word (for example `Nuka, hello`) or reply to one of the bot's messages.
+- **Groups:** mention the trigger word (for example `Нука, привет`) or reply to one of the bot's messages.
 - If privacy mode is enabled in BotFather, the bot only sees commands and mentions, so a plain trigger word without a mention may not work until privacy mode is disabled.
 - `/reset` clears the chat context.
 - In groups you can also clear context with messages such as `<BotName>, reset`.
@@ -162,9 +162,8 @@ Expected `.env` values:
 - `OPENAI_MODEL` - model name
 - `WEB_SEARCH_API_KEY` - search API key (used for `serper`)
 - `ALLOWED_USER_IDS` - comma-separated list of allowed Telegram `user_id` values; empty means open access
-- `IMAGE_GENERATION_ENABLED` - `1` or `0`, enables image generation inside the bot
-- `WEB_APP_URL` - URL of your hosted copy of `app/index.html`
-- `IMAGE_GENERATION_TIMEOUT` - request timeout in seconds (default `60`)
-- `IMAGE_GENERATION_WIDTH`, `IMAGE_GENERATION_HEIGHT` - desired image size (default `1024`)
+- `IMAGE_GENERATION_ENABLED` - `1` or `0`, enables image generation inside the bot (default `1`)
+- `WEB_APP_URL` - URL of your hosted copy of `index.html`
+- `IMAGE_GENERATION_WIDTH`, `IMAGE_GENERATION_HEIGHT` - generated image size in pixels (default `256`; multiples of 8)
 
 Other parameters such as limits, prompts, search behavior, and context rules are configured directly in `app/config.py`.
