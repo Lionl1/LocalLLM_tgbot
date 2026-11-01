@@ -1,0 +1,22 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Lint
+        run: uvx ruff check --select F,E9 .
+      # The full dependency set pulls in torch, whisper and diffusers; the
+      # tested modules only need the Telegram library and dotenv.
+      - name: Run tests
+        run: >
+          uv run --no-project --python 3.11
+          --with python-telegram-bot==20.8 --with python-dotenv==1.0.1 --with pytest
+          pytest -q
