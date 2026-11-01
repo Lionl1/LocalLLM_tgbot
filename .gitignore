@@ -9,3 +9,6 @@ __pycache__/
 # База данных бота и кэш
 data/
 .cache/
+
+# macOS
+.DS_Store
