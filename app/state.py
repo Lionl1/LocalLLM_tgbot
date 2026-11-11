@@ -1,4 +1,6 @@
 import json
+import logging
+import os
 from pathlib import Path
 import random
 import asyncio
@@ -52,6 +54,51 @@ _settings_lock = asyncio.Lock()
 _history_lock = asyncio.Lock()
 _knowledge_lock = asyncio.Lock()
 _logs_lock = asyncio.Lock()
+
+logger = logging.getLogger(__name__)
+
+
+async def _read_state(path):
+    """Loads {chat_id: value} from a state file; a damaged file is set aside, not lost."""
+    if not path.exists():
+        return {}
+    try:
+        async with aiofiles.open(path, "r", encoding="utf-8") as stream:
+            raw = json.loads(await stream.read())
+        if not isinstance(raw, dict):
+            raise ValueError("not a JSON object")
+    except OSError as exc:
+        logger.error("Cannot read %s: %s", path, exc)
+        return {}
+    except ValueError as exc:  # includes json.JSONDecodeError
+        # The next save would overwrite it with an empty state: keep a copy for recovery.
+        backup = path.with_name(path.name + ".corrupt")
+        logger.error("%s is damaged (%s); kept as %s", path, exc, backup.name)
+        try:
+            os.replace(path, backup)
+        except OSError:
+            pass
+        return {}
+    result = {}
+    for raw_chat_id, value in raw.items():
+        try:
+            result[int(raw_chat_id)] = value
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+async def _write_state(path, state):
+    """Writes to a temporary file and renames it: a crash mid-write keeps the old file."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps({str(chat_id): value for chat_id, value in state.items()}, ensure_ascii=False, indent=2)
+    tmp_path = path.with_name(path.name + ".tmp")
+    try:
+        async with aiofiles.open(tmp_path, "w", encoding="utf-8") as stream:
+            await stream.write(payload)
+        os.replace(tmp_path, path)
+    except OSError as exc:
+        logger.error("Cannot save %s: %s", path, exc)
 
 PERSONAS = {
     "default": {
@@ -110,98 +157,25 @@ DEFAULT_SETTINGS = {
 
 
 async def load_persisted_chat_settings():
-    # Load settings
-    if CHAT_SETTINGS_FILE.exists():
-        try:
-            async with aiofiles.open(CHAT_SETTINGS_FILE, "r", encoding="utf-8") as stream:
-                content = await stream.read()
-                raw = json.loads(content)
-                for raw_chat_id, settings in raw.items():
-                    try:
-                        chat_id = int(raw_chat_id)
-                        CHAT_SETTINGS[chat_id] = settings
-                    except (TypeError, ValueError):
-                        continue
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    # Load history
-    if CHAT_HISTORY_FILE.exists():
-        try:
-            async with aiofiles.open(CHAT_HISTORY_FILE, "r", encoding="utf-8") as stream:
-                content = await stream.read()
-                raw = json.loads(content)
-                for raw_chat_id, history in raw.items():
-                    try:
-                        chat_id = int(raw_chat_id)
-                        CHAT_MEMORY[chat_id] = history
-                    except (TypeError, ValueError):
-                        continue
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    # Load knowledge
-    if CHAT_KNOWLEDGE_FILE.exists():
-        try:
-            async with aiofiles.open(CHAT_KNOWLEDGE_FILE, "r", encoding="utf-8") as stream:
-                content = await stream.read()
-                raw = json.loads(content)
-                for raw_chat_id, knowledge in raw.items():
-                    try:
-                        chat_id = int(raw_chat_id)
-                        CHAT_KNOWLEDGE[chat_id] = knowledge
-                    except (TypeError, ValueError):
-                        continue
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    # Load logs
-    if CHAT_LOGS_FILE.exists():
-        try:
-            async with aiofiles.open(CHAT_LOGS_FILE, "r", encoding="utf-8") as stream:
-                content = await stream.read()
-                raw = json.loads(content)
-                for raw_chat_id, logs in raw.items():
-                    try:
-                        chat_id = int(raw_chat_id)
-                        CHAT_LOGS[chat_id] = logs
-                    except (TypeError, ValueError):
-                        continue
-        except (OSError, json.JSONDecodeError):
-            pass
+    CHAT_SETTINGS.update(await _read_state(CHAT_SETTINGS_FILE))
+    CHAT_MEMORY.update(await _read_state(CHAT_HISTORY_FILE))
+    CHAT_KNOWLEDGE.update(await _read_state(CHAT_KNOWLEDGE_FILE))
+    CHAT_LOGS.update(await _read_state(CHAT_LOGS_FILE))
 
 
 async def _write_chat_settings():
     async with _settings_lock:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {str(chat_id): settings for chat_id, settings in CHAT_SETTINGS.items()}
-        try:
-            async with aiofiles.open(CHAT_SETTINGS_FILE, "w", encoding="utf-8") as stream:
-                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-        except OSError:
-            return
+        await _write_state(CHAT_SETTINGS_FILE, CHAT_SETTINGS)
 
 
 async def _write_chat_history():
     async with _history_lock:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {str(chat_id): history for chat_id, history in CHAT_MEMORY.items()}
-        try:
-            async with aiofiles.open(CHAT_HISTORY_FILE, "w", encoding="utf-8") as stream:
-                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-        except OSError:
-            return
+        await _write_state(CHAT_HISTORY_FILE, CHAT_MEMORY)
 
 
 async def _write_chat_knowledge():
     async with _knowledge_lock:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {str(chat_id): knowledge for chat_id, knowledge in CHAT_KNOWLEDGE.items()}
-        try:
-            async with aiofiles.open(CHAT_KNOWLEDGE_FILE, "w", encoding="utf-8") as stream:
-                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-        except OSError:
-            return
+        await _write_state(CHAT_KNOWLEDGE_FILE, CHAT_KNOWLEDGE)
 
 
 async def persist_settings():
@@ -216,13 +190,7 @@ async def persist_knowledge():
 
 async def _write_chat_logs():
     async with _logs_lock:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        payload = {str(chat_id): logs for chat_id, logs in CHAT_LOGS.items()}
-        try:
-            async with aiofiles.open(CHAT_LOGS_FILE, "w", encoding="utf-8") as stream:
-                await stream.write(json.dumps(payload, ensure_ascii=False, indent=2))
-        except OSError:
-            return
+        await _write_state(CHAT_LOGS_FILE, CHAT_LOGS)
 
 
 async def persist_logs():
